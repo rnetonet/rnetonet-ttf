@@ -1,28 +1,32 @@
-"""Build the `rnetonet` family by instancing the CascadiaMono variable fonts.
+"""Build the `rnetonet` family by instancing the JetBrains Mono variable fonts.
 
-`rnetonet` is a rebrand of the ligature-free **Cascadia Mono** design. It is produced by
-pinning the `wght` axis of Microsoft's variable CascadiaMono fonts (not by consuming the
-pre-built statics), so the whole family derives from two source files:
+`rnetonet` is a rebrand of **JetBrains Mono**, with its coding ligatures kept intact. The four
+RIBBI styles are produced by pinning the `wght` axis of JetBrains' variable fonts, so the whole
+family derives from two source files:
 
-    rnetonet/sources/CascadiaMono.ttf        @ wght=350 (SemiLight) -> rnetonet-Regular.ttf        (-> 400)
-    rnetonet/sources/CascadiaMono.ttf        @ wght=400 (Regular)   -> rnetonet-Bold.ttf           (-> 700)
-    rnetonet/sources/CascadiaMonoItalic.ttf  @ wght=350 (SemiLight) -> rnetonet-RegularItalic.ttf  (-> 400)
-    rnetonet/sources/CascadiaMonoItalic.ttf  @ wght=400 (Regular)   -> rnetonet-BoldItalic.ttf     (-> 700)
+    rnetonet/sources/JetBrains_Mono/JetBrainsMono[wght].ttf        @ wght=350 (SemiLight) -> rnetonet-Regular.ttf        (-> 400)
+    rnetonet/sources/JetBrains_Mono/JetBrainsMono[wght].ttf        @ wght=400 (Regular)   -> rnetonet-Bold.ttf           (-> 700)
+    rnetonet/sources/JetBrains_Mono/JetBrainsMono-Italic[wght].ttf @ wght=350 (SemiLight) -> rnetonet-RegularItalic.ttf  (-> 400)
+    rnetonet/sources/JetBrains_Mono/JetBrainsMono-Italic[wght].ttf @ wght=400 (Regular)   -> rnetonet-BoldItalic.ttf     (-> 700)
 
-The SemiLight instance ships as the family's Regular (usWeightClass 400) and the Regular
-instance as its Bold (700), so the four files form one RIBBI family that bold- and
-italic-links correctly. Cascadia Mono is the ligature-free cut, so `rnetonet` ships without
-coding ligatures.
+The SemiLight instance (wght 350, midway between JetBrains' Light 300 and Regular 400) ships as
+the family's Regular (usWeightClass 400) and the Regular instance as its Bold (700), so the
+four files form one RIBBI family that bold- and italic-links correctly.
 
-Everything is one pass -- instancing, naming, STAT, vertical metrics, smart-dropout patch --
-so no later step can orphan a name record. Glyph outlines, TrueType hinting
-(fpgm/prep/cvt/gasp) and the layout tables come straight from the pinned instance; only
-naming, weight/style flags, STAT and vertical metrics are rewritten, plus a 7-byte
-smart-dropout instruction appended to `prep` (see below).
+Everything is one pass -- instancing, naming, STAT, vertical metrics -- so no later step can
+orphan a name record. Glyph outlines and the layout tables (GSUB/GPOS, and therefore JetBrains'
+`calt`/`liga` ligatures) come straight from the pinned instance untouched; only naming,
+weight/style flags, STAT and vertical metrics are rewritten.
+
+Unlike the Cascadia design this replaces, JetBrains Mono is not fpgm/cvt-hinted -- it relies on
+`gasp` smoothing plus a smart-dropout `prep` (both already present in the source and passed
+through). So this build does NOT force head.flags bit 3 (integer PPEM), which only applies to
+manually hinted fonts.
 
 OFL compliance: copyright (nameID 0), full license (13), license URL (14) and author
-acknowledgements (8/9) are preserved; the reserved name is dropped by renaming the family
-(OFL clause 3) and the trademark line (7) is dropped. No license text is altered (clause 5).
+acknowledgements (8/9 -- JetBrains / Philipp Nurullin, Konstantin Bulenkov) are preserved; the
+reserved name is dropped by renaming the family (OFL clause 3) and the trademark line (7) is
+dropped. No license text is altered (clause 5).
 
 Usage:
     python pipeline/build.py
@@ -39,32 +43,31 @@ from fontTools.varLib import instancer
 # Repo root, resolved from this file so the pipeline runs from any working directory.
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FAMILY = "rnetonet"
-SRC_DIR = os.path.join(REPO, FAMILY, "sources")
+SRC_DIR = os.path.join(REPO, FAMILY, "sources", "JetBrains_Mono")
 OUT_DIR = os.path.join(REPO, FAMILY)
 WINDOWS = (3, 1, 0x409)
 
 ITALIC, BOLD, REGULAR, USE_TYPO, WWS = 1 << 0, 1 << 5, 1 << 6, 1 << 7, 1 << 8
 ELIDABLE = 0x2
 
-# Same vertical metrics across all four styles (identical Cascadia design at upem 2048):
-# sized to the realistic glyph set, not the full bounding box whose deep descent is driven
-# by rare glyphs. Kept identical across all four styles so line height is stable.
-WIN_ASCENT, WIN_DESCENT = 2304, 568
+# JetBrains Mono's native vertical metrics (upem 1000), shared across every weight. Kept as the
+# designer set them -- consistent between styles, so line height is stable.
+WIN_ASCENT, WIN_DESCENT = 1165, 400
 
-# Smart-dropout control: PUSHW[] 511; SCANCTRL[]; PUSHB[] 4; SCANTYPE[]. Microsoft's static
-# CascadiaMono builds carry this in `prep`; the variable fonts do not, so instancing would
-# inherit its absence and fontbakery's `opentype/smart_dropout` would FAIL. We append it once
-# (idempotent) so hinted rendering drops out thin stems the way the static builds do.
+# Smart-dropout control: PUSHW[] 511; SCANCTRL[]; PUSHB[] 4; SCANTYPE[]. JetBrains' variable
+# fonts already carry exactly this in `prep`, so patch_smart_dropout() is a no-op here; it stays
+# in the pipeline as a guard in case a future source lacks it (as Cascadia's variable did).
 SMART_DROPOUT = bytes([0xB8, 0x01, 0xFF, 0x85, 0xB0, 0x04, 0x8D])
 
-# Names that describe Cascadia Mono and must not survive the rename. 1-6 are rewritten;
-# 7 is the Microsoft trademark line; 16/17 are the typographic family/subfamily; 25 is the
+# Names that describe JetBrains Mono and must not survive the rename. 1-6 are rewritten;
+# 7 is the JetBrains trademark line; 16/17 are the typographic family/subfamily; 25 is the
 # variations PostScript name prefix (dead once instanced).
 DROP_IDS = {1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 20, 21, 22, 25}
 
-# IDs 256+ hold both the variable-axis / named-instance labels (dead once instanced) and any
-# stylistic-set UI labels that GSUB still points at. Dropping the whole range would orphan the
-# latter, so collect what the layout tables reference and keep exactly those.
+# IDs 256+ hold both the variable-axis / named-instance labels (dead once instanced) and the
+# stylistic-set UI labels that GSUB still points at (JetBrains Mono has several). Dropping the
+# whole range would orphan the latter, so collect what the layout tables reference and keep
+# exactly those -- this is also what preserves the ligature/stylistic-set feature UI.
 FEATURE_NAME_ATTRS = (
     "UINameID",
     "FeatUILabelNameID",
@@ -110,8 +113,8 @@ BOLD_WGHT = dict(value=700, name="Bold")
 ROMAN_ITAL = dict(value=0, name="Roman", flags=ELIDABLE, linkedValue=1)
 ITALIC_ITAL = dict(value=1, name="Italic")
 
-ROMAN = "CascadiaMono.ttf"
-ITAL = "CascadiaMonoItalic.ttf"
+ROMAN = "JetBrainsMono[wght].ttf"
+ITAL = "JetBrainsMono-Italic[wght].ttf"
 
 BUILDS = [
     # src, wght, outfile, subfamily, ps suffix, weightclass, bold, italic, stat wght, stat ital
@@ -163,8 +166,6 @@ def main():
         os2.panose.bWeight = 8 if bold else 5
 
         head.macStyle = (head.macStyle & ~0b11) | (0b1 if bold else 0) | (0b10 if italic else 0)
-        # TrueType-hinted (fpgm/prep) -> PPEM must round to integers: set head.flags bit 3.
-        head.flags |= 1 << 3
 
         os2.usWinAscent, os2.usWinDescent = WIN_ASCENT, WIN_DESCENT
 
@@ -189,7 +190,7 @@ def main():
         font.save(os.path.join(OUT_DIR, out))
         prep_len = len(font["prep"].program.getBytecode()) if "prep" in font else 0
         print(
-            f"{src:<24} @wght={wght} -> {out:<28} w={weight_class} "
+            f"{src:<28} @wght={wght} -> {out:<28} w={weight_class} "
             f"typo={'Y' if os2.fsSelection & USE_TYPO else 'n'} "
             f"win={os2.usWinAscent}/{os2.usWinDescent} names={len(name.names)} "
             f"prep={prep_len} fvar={'fvar' in font}"
