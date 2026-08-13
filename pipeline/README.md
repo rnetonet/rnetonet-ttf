@@ -36,14 +36,15 @@ Per style, in a single pass (so no later step can orphan a name record):
 
 | Source (variable) | `wght` pinned | Output | usWeightClass |
 |---|---|---|---|
-| `CascadiaCode.ttf`       | 300 (Light)     | `rnetonet-Regular.ttf`       | 400 |
-| `CascadiaCode.ttf`       | 350 (SemiLight) | `rnetonet-Bold.ttf`          | 700 |
-| `CascadiaCodeItalic.ttf` | 300 (Light)     | `rnetonet-RegularItalic.ttf` | 400 |
-| `CascadiaCodeItalic.ttf` | 350 (SemiLight) | `rnetonet-BoldItalic.ttf`    | 700 |
+| `CascadiaCode.ttf`       | 325 (Light..SemiLight) | `rnetonet-Regular.ttf`       | 400 |
+| `CascadiaCode.ttf`       | 350 (SemiLight)        | `rnetonet-Bold.ttf`          | 700 |
+| `CascadiaCodeItalic.ttf` | 325 (Light..SemiLight) | `rnetonet-RegularItalic.ttf` | 400 |
+| `CascadiaCodeItalic.ttf` | 350 (SemiLight)        | `rnetonet-BoldItalic.ttf`    | 700 |
 
-The Light instance becomes the family Regular and the SemiLight instance its Bold -- a
-deliberately low-contrast pairing (only 50 axis units apart) -- so the four files bold- and
-italic-link as one RIBBI family. Glyph outlines, TrueType hinting (`fpgm`/`prep`/`cvt`/`gasp`)
+The Regular is pinned at wght 325 -- midway between Cascadia's Light (300) and SemiLight (350)
+named instances (instancing accepts any axis value, not just named ones) -- and the SemiLight
+instance (350) becomes the Bold. It is a deliberately low-contrast pairing (only 25 axis units
+apart), so the four files bold- and italic-link as one RIBBI family. Glyph outlines, TrueType hinting (`fpgm`/`prep`/`cvt`/`gasp`)
 and layout tables (`GSUB`/`GPOS`, hence the `calt`/`liga` **ligatures**) pass through from the
 pinned instance untouched; only naming, weight/style flags, STAT and vertical metrics are
 rewritten. A 7-byte smart-dropout instruction is appended to `prep` (the static Cascadia builds
