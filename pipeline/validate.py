@@ -5,8 +5,10 @@ Four stages, each of which can fail the run (non-zero exit) so this doubles as a
 1. OTS (OpenType Sanitizer) must accept every output -- the hard "will browsers and
    rasterizers actually load this" bar.
 2. Structural RIBBI checks: one shared family name, correct subfamilies / weight classes /
-   style bits, STAT present, `fvar` gone (fully instanced), smart-dropout present in `prep`,
-   uniform advance widths (monospace), Windows-only name records, no DSIG.
+   style bits, STAT present, `fvar` gone (fully instanced), ttfautohint hinting present
+   (fpgm/prep/cvt/gasp + TTFA + per-glyph instructions on >95% of non-empty glyphs),
+   smart-dropout present in `prep`, uniform advance widths (monospace), Windows-only name
+   records, no DSIG.
 3. Ligatures: JetBrains Mono's coding ligatures must still fire (this family keeps them), so
    HarfBuzz-shaping a few coding sequences must differ from shaping with ligature features
    forced off.
@@ -115,9 +117,19 @@ def stage_structure(report):
         report.check(bool(mac & 0b01) == spec["bold"], f"{fn}: macStyle bold bit == {spec['bold']}")
         report.check(bool(mac & 0b10) == spec["italic"], f"{fn}: macStyle italic bit == {spec['italic']}")
 
-        # Manually hinted fonts (fpgm/cvt) must set head.flags bit 3 so PPEM rounds to integers.
-        if "fpgm" in font or "cvt " in font:
-            report.check(bool(head.flags & (1 << 3)), f"{fn}: head.flags integer-ppem bit set (hinted)")
+        # ttfautohint must have added a full instruction set: control programs, a gasp, a TTFA
+        # provenance record, and per-glyph hints on essentially every non-empty glyph.
+        for tbl in ("fpgm", "prep", "cvt ", "gasp"):
+            report.check(tbl in font, f"{fn}: has '{tbl.strip()}' hinting table")
+        report.check("TTFA" in font, f"{fn}: TTFA table present (ttfautohint provenance)")
+        report.check(bool(head.flags & (1 << 3)), f"{fn}: head.flags force-integer-ppem bit set (hinted)")
+        glyf = font["glyf"]
+        non_empty = [g for g in glyf.keys() if glyf[g].numberOfContours != 0]
+        hinted = [g for g in non_empty
+                  if getattr(glyf[g], "program", None) and len(glyf[g].program.getBytecode()) > 0]
+        frac = len(hinted) / max(1, len(non_empty))
+        report.check(frac > 0.95, f"{fn}: >95% of non-empty glyphs hinted",
+                     f"{len(hinted)}/{len(non_empty)} = {frac:.0%}")
 
         report.check("fvar" not in font, f"{fn}: fully instanced (no fvar)")
         report.check("STAT" in font, f"{fn}: STAT present")

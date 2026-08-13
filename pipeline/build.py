@@ -1,4 +1,4 @@
-"""Build the `rnetonet` family by instancing the JetBrains Mono variable fonts.
+"""Build the `rnetonet` family by instancing and hinting the JetBrains Mono variable fonts.
 
 `rnetonet` is a rebrand of **JetBrains Mono** (kept intact, coding ligatures included). The four
 RIBBI styles are produced by pinning the `wght` axis of JetBrains Mono's variable fonts, so the
@@ -15,11 +15,18 @@ the family's Regular (usWeightClass 400); the Regular instance (wght 400) ships 
 (700). That is a deliberately low-contrast pairing (only 50 axis units apart), so the four files
 still form one RIBBI family that bold- and italic-links correctly.
 
-Everything is one pass -- instancing, naming, STAT, vertical metrics, smart-dropout patch --
-so no later step can orphan a name record. Glyph outlines, hinting (JetBrains ships `gasp`-based
-smoothing and a `prep` smart-dropout, no `fpgm`/`cvt`) and the layout tables (GSUB/GPOS, hence
-JetBrains Mono's `calt`/`liga` ligatures) come straight from the pinned instance untouched; only
-naming, weight/style flags, STAT and vertical metrics are rewritten.
+Per style the pipeline is: instance -> **ttfautohint** -> rebrand. JetBrains' variable fonts ship
+without TrueType instructions (no `fpgm`/`cvt`, only a `gasp` and a smart-dropout `prep`), so the
+pinned instance is effectively unhinted and leans entirely on the rasterizer -- which reads soft
+on Windows/DirectWrite (VS Code). We run ttfautohint over each instance to add a full auto-hinted
+instruction set (fpgm/prep/cvt + per-glyph programs) tuned aggressively for Windows: hinting range
+8..96 ppem with no upper limit, Windows blue zones, latin fallback so symbols/box-drawing are
+hinted too, and *strong* stem-width snapping for grayscale, GDI and DirectWrite ClearType so stems
+land on whole pixels (crispest editor rendering). A `TTFA` table records the exact options used.
+
+Only after hinting do we rewrite naming, weight/style flags, STAT and vertical metrics. Glyph
+outlines and the layout tables (GSUB/GPOS, hence JetBrains Mono's `calt`/`liga` ligatures) are
+never touched; ttfautohint adds instructions and a gasp/cvt/fpgm/prep, and owns `head.flags`.
 
 OFL compliance: copyright (nameID 0), full license (13), license URL (14) and author
 acknowledgements (8/9) are preserved; the reserved name is dropped by renaming the family
@@ -28,14 +35,18 @@ acknowledgements (8/9) are preserved; the reserved name is dropped by renaming t
 Usage:
     python pipeline/build.py
 
+Requires `ttfautohint-py` (bundles the ttfautohint library) alongside `fonttools`.
 Run `python pipeline/validate.py` afterwards to sanity-check the four outputs.
 """
 
+import io
 import os
 
 from fontTools.otlLib.builder import buildStatTable
 from fontTools.ttLib import TTFont
 from fontTools.varLib import instancer
+from ttfautohint import ttfautohint
+from ttfautohint.options import StemWidthMode
 
 # Repo root, resolved from this file so the pipeline runs from any working directory.
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -48,12 +59,35 @@ ITALIC, BOLD, REGULAR, USE_TYPO, WWS = 1 << 0, 1 << 5, 1 << 6, 1 << 7, 1 << 8
 ELIDABLE = 0x2
 
 # JetBrains Mono's native vertical metrics (upem 1000), shared across every weight. Kept as the
-# designer set them so line height is stable across the four styles.
+# designer set them so line height is stable across the four styles. ttfautohint reads these to
+# build its Windows-compatibility blue zones, so setting them here (== the source's own values)
+# stays consistent with the hinting.
 WIN_ASCENT, WIN_DESCENT = 1165, 400
 
-# Smart-dropout control: PUSHW[] 511; SCANCTRL[]; PUSHB[] 4; SCANTYPE[]. JetBrains' variable
-# fonts already carry this 7-byte instruction in `prep`; we re-assert it idempotently so a source
-# that lacked it would still pass fontbakery's `opentype/smart_dropout`.
+# ttfautohint options -- tuned to hint as hard as is sensible for Windows/DirectWrite (VS Code).
+# STRONG stem width on all three rendering targets snaps stems to whole pixels (crispest, at the
+# cost of a slightly heavier look); latin default+fallback extends hinting to symbols/box-drawing;
+# range 8..96 with no upper limit keeps hints live at every size; a TTFA table records the options.
+STRONG = StemWidthMode.STRONG
+TTFAUTOHINT_OPTIONS = dict(
+    hinting_range_min=8,
+    hinting_range_max=96,
+    hinting_limit=0,  # 0 == no upper ppem limit: hints stay active at all sizes
+    increase_x_height=14,
+    windows_compatibility=True,
+    default_script="latn",
+    fallback_script="latn",
+    hint_composites=True,
+    gray_stem_width_mode=STRONG,
+    gdi_cleartype_stem_width_mode=STRONG,
+    dw_cleartype_stem_width_mode=STRONG,
+    TTFA_info=True,
+)
+
+# Smart-dropout control: PUSHW[] 511; SCANCTRL[]; PUSHB[] 4; SCANTYPE[]. ttfautohint already emits
+# this exact sequence in the `prep` it generates, so the guard below is a defensive no-op here; it
+# stays so the pipeline still satisfies fontbakery's `opentype/smart_dropout` if a future hinting
+# path ever omitted it.
 SMART_DROPOUT = bytes([0xB8, 0x01, 0xFF, 0x85, 0xB0, 0x04, 0x8D])
 
 # Names that describe JetBrains Mono and must not survive the rename. 1-6 are rewritten;
@@ -93,6 +127,14 @@ def referenced_name_ids(font):
     return ids
 
 
+def autohint(font):
+    """Serialize `font`, run ttfautohint over it, and return the hinted TTFont."""
+    buf = io.BytesIO()
+    font.save(buf)
+    hinted = ttfautohint(in_buffer=buf.getvalue(), **TTFAUTOHINT_OPTIONS)
+    return TTFont(io.BytesIO(hinted))
+
+
 def patch_smart_dropout(font):
     """Append the smart-dropout instruction to `prep` if it is not already present."""
     if "prep" not in font:
@@ -126,9 +168,12 @@ def main():
     os.makedirs(OUT_DIR, exist_ok=True)
 
     for src, wght, out, subfamily, ps_suffix, weight_class, bold, italic, stat_w, stat_i in BUILDS:
-        font = instancer.instantiateVariableFont(
+        instance = instancer.instantiateVariableFont(
             TTFont(os.path.join(SRC_DIR, src)), {"wght": wght}, inplace=True, updateFontNames=False
         )
+        # Hint the pinned instance before any metadata surgery, so the rebrand can't be clobbered
+        # by ttfautohint and ttfautohint sees the untouched outlines/metrics.
+        font = autohint(instance)
         name, os2, head = font["name"], font["OS/2"], font["head"]
 
         # Read source version/unique-id parts before the drop step removes them.
@@ -163,11 +208,11 @@ def main():
         os2.panose.bWeight = 8 if bold else 5
 
         head.macStyle = (head.macStyle & ~0b11) | (0b1 if bold else 0) | (0b10 if italic else 0)
-        # Only TrueType-instruction-hinted fonts (fpgm/cvt) need head.flags bit 3 to force
-        # integer PPEM. JetBrains ships neither -- it uses gasp smoothing -- so leave the bit as
-        # the source set it rather than forcing it on.
-        if "fpgm" in font or "cvt " in font:
-            head.flags |= 1 << 3
+        # Force integer PPEM (head.flags bit 3). The font is now TrueType-hinted, and hints assume
+        # whole-pixel sizes -- at fractional ppem (as DirectWrite can request) the instructions
+        # misfire. ttfautohint leaves this bit clear, so we set it: it makes the hinting land
+        # cleanly in VS Code and satisfies fontbakery's `integer_ppem_if_hinted`.
+        head.flags |= 1 << 3
 
         os2.usWinAscent, os2.usWinDescent = WIN_ASCENT, WIN_DESCENT
 
@@ -189,13 +234,18 @@ def main():
         if "DSIG" in font:
             del font["DSIG"]
 
+        glyf = font["glyf"]
+        hinted_glyphs = sum(
+            1 for gname in glyf.keys()
+            if getattr(glyf[gname], "program", None) and len(glyf[gname].program.getBytecode()) > 0
+        )
+
         font.save(os.path.join(OUT_DIR, out))
-        prep_len = len(font["prep"].program.getBytecode()) if "prep" in font else 0
         print(
             f"{src:<28} @wght={wght} -> {out:<28} w={weight_class} "
             f"typo={'Y' if os2.fsSelection & USE_TYPO else 'n'} "
-            f"win={os2.usWinAscent}/{os2.usWinDescent} names={len(name.names)} "
-            f"prep={prep_len} fvar={'fvar' in font}"
+            f"hinted={hinted_glyphs}/{len(glyf.keys())} "
+            f"ttfa={'TTFA' in font} fvar={'fvar' in font}"
         )
 
 
