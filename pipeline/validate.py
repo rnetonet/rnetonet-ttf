@@ -1,25 +1,28 @@
 """Validate the built `rnetonet` family. Acts as the acceptance gate for `build.py`.
 
-Four stages, each of which can fail the run (non-zero exit) so this doubles as a CI gate:
+Three stages, each of which can fail the run (non-zero exit) so this doubles as a CI gate:
 
 1. OTS (OpenType Sanitizer) must accept every output -- the hard "will browsers and
    rasterizers actually load this" bar.
 2. Structural RIBBI checks: one shared family name, correct subfamilies / weight classes /
-   style bits, STAT present, `fvar` gone (fully instanced), ttfautohint hinting present
-   (fpgm/prep/cvt/gasp + TTFA + per-glyph instructions on >95% of non-empty glyphs),
-   smart-dropout present in `prep`, uniform advance widths (monospace), Windows-only name
-   records, no DSIG.
-3. Ligatures: JetBrains Mono's coding ligatures must still fire (this family keeps them), so
-   HarfBuzz-shaping a few coding sequences must differ from shaping with ligature features
-   forced off.
-4. fontbakery `check-universal` must surface no FAIL beyond the known inherited set
-   (EXPECTED_FAILS). Any *new* FAIL fails the run; the expected one is reported but tolerated.
+   style bits, native TrueType hinting intact (fpgm/cvt present -> integer-ppem `head.flags`
+   bit set), STAT present, `fvar` gone (fully instanced), smart-dropout present in `prep`,
+   uniform advance widths (monospace), Windows-only name records, no DSIG.
+3. fontbakery `check-universal` must surface no FAIL beyond the known inherited set
+   (EXPECTED_FAILS). Any *new* FAIL fails the run; the expected ones are reported but tolerated.
 
-The EXPECTED_FAILS are inherited from the upstream JetBrains Mono design, not regressions
-introduced by the rebrand -- verified by diffing against plain-instanced controls, where the
-rebrand introduces zero new FAILs and in fact fixes the one the raw instance has (no_mac_entries):
+Cascadia Mono is the ligature-free cut of Cascadia, so there is no coding-ligature stage here
+(the family has none by design).
 
-    empty_letters                  upstream: a few glyphs (e.g. NBSP) intentionally have no outline
+The EXPECTED_FAILS are inherited from the upstream Cascadia design, not regressions introduced
+by the rebrand -- verified by diffing against plain-instanced controls, where the rebrand
+introduces zero new FAILs and in fact fixes several the raw instance has (smart_dropout,
+no_mac_entries):
+
+    arabic_high_hamza              upstream glyph-composition choice in Cascadia
+    case_mapping                   upstream: a few cased glyphs lack round-trip case pairs
+    family/win_ascent_and_descent  upstream: native win metrics don't cover the full glyph bbox
+    nested_components              upstream: composite glyphs reference other composites
 
 Usage:
     python pipeline/validate.py
@@ -33,7 +36,6 @@ import sys
 import tempfile
 
 import ots
-import uharfbuzz as hb
 from fontTools.ttLib import TTFont
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -43,15 +45,14 @@ OUT_DIR = os.path.join(REPO, FAMILY)
 ITALIC, BOLD, REGULAR, USE_TYPO, WWS = 1 << 0, 1 << 5, 1 << 6, 1 << 7, 1 << 8
 SMART_DROPOUT = bytes([0xB8, 0x01, 0xFF, 0x85, 0xB0, 0x04, 0x8D])
 
-# FAILs known to come from the upstream JetBrains Mono design, keyed by fontbakery check id.
-# Anything not in here is treated as a regression. See the module docstring for how it's verified.
+# FAILs known to come from the upstream Cascadia design, keyed by fontbakery check id. Anything
+# not in here is treated as a regression. See the module docstring for how this set is verified.
 EXPECTED_FAILS = {
-    "empty_letters",
+    "arabic_high_hamza",
+    "case_mapping",
+    "family/win_ascent_and_descent",
+    "nested_components",
 }
-
-# Coding sequences whose shaping should change when ligatures fire (used by stage_ligatures).
-LIGATURE_PROBE = "-> => != === >= <= |> </ />"
-LIGATURE_OFF = {"calt": False, "liga": False, "dlig": False, "clig": False, "rclt": False}
 
 # filename -> expected structural properties
 SPECS = {
@@ -117,19 +118,10 @@ def stage_structure(report):
         report.check(bool(mac & 0b01) == spec["bold"], f"{fn}: macStyle bold bit == {spec['bold']}")
         report.check(bool(mac & 0b10) == spec["italic"], f"{fn}: macStyle italic bit == {spec['italic']}")
 
-        # ttfautohint must have added a full instruction set: control programs, a gasp, a TTFA
-        # provenance record, and per-glyph hints on essentially every non-empty glyph.
-        for tbl in ("fpgm", "prep", "cvt ", "gasp"):
-            report.check(tbl in font, f"{fn}: has '{tbl.strip()}' hinting table")
-        report.check("TTFA" in font, f"{fn}: TTFA table present (ttfautohint provenance)")
-        report.check(bool(head.flags & (1 << 3)), f"{fn}: head.flags force-integer-ppem bit set (hinted)")
-        glyf = font["glyf"]
-        non_empty = [g for g in glyf.keys() if glyf[g].numberOfContours != 0]
-        hinted = [g for g in non_empty
-                  if getattr(glyf[g], "program", None) and len(glyf[g].program.getBytecode()) > 0]
-        frac = len(hinted) / max(1, len(non_empty))
-        report.check(frac > 0.95, f"{fn}: >95% of non-empty glyphs hinted",
-                     f"{len(hinted)}/{len(non_empty)} = {frac:.0%}")
+        # Cascadia is manually hinted (fpgm/cvt), so head.flags bit 3 must be set for PPEM to
+        # round to integers -- otherwise the instructions misfire at fractional sizes.
+        if "fpgm" in font or "cvt " in font:
+            report.check(bool(head.flags & (1 << 3)), f"{fn}: head.flags integer-ppem bit set (hinted)")
 
         report.check("fvar" not in font, f"{fn}: fully instanced (no fvar)")
         report.check("STAT" in font, f"{fn}: STAT present")
@@ -149,23 +141,6 @@ def stage_structure(report):
                  f"got {families}")
     report.check({SPECS[f]["subfamily"] for f in SPECS} == {"Regular", "Bold", "Italic", "Bold Italic"},
                  "RIBBI subfamilies complete")
-
-
-def stage_ligatures(report):
-    print("\n== Ligatures (must stay active) ==")
-    for fn in SPECS:
-        data = open(os.path.join(OUT_DIR, fn), "rb").read()
-        font = hb.Font(hb.Face(data))
-
-        def shape(features):
-            buf = hb.Buffer()
-            buf.add_str(LIGATURE_PROBE)
-            buf.guess_segment_properties()
-            hb.shape(font, buf, features)
-            return tuple(g.codepoint for g in buf.glyph_infos)
-
-        active = shape({}) != shape(LIGATURE_OFF)
-        report.check(active, f"{fn}: coding ligatures fire", "shaping identical with ligatures off")
 
 
 def _check_id(check):
@@ -216,7 +191,6 @@ def main():
     report = Report()
     stage_ots(report)
     stage_structure(report)
-    stage_ligatures(report)
     stage_fontbakery(report)
 
     print("\n" + ("ALL CHECKS PASSED" if report.ok else "VALIDATION FAILED"))

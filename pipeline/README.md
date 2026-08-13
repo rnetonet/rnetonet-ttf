@@ -1,17 +1,16 @@
 # rnetonet build pipeline
 
 Two scripts that reproduce and verify the `rnetonet` font family from its upstream sources.
-The family is a rebrand of **JetBrains Mono**, with its coding ligatures kept and a fresh
-**ttfautohint** hinting pass added for crisp rendering on Windows/DirectWrite (VS Code). The four
-RIBBI styles are produced by pinning the `wght` axis of JetBrains Mono's variable fonts, so the
-whole family derives from two source files.
+The family is a rebrand of **Cascadia Mono** -- the ligature-free cut of Cascadia. The four RIBBI
+styles are produced by pinning the `wght` axis of Cascadia Mono's variable fonts, so the whole
+family derives from two source files.
 
 ```
 rnetonet/
   sources/
-    JetBrains_Mono/                 <- upstream JetBrains Mono (build inputs)
-      JetBrainsMono[wght].ttf             (variable, roman)
-      JetBrainsMono-Italic[wght].ttf      (variable, italic)
+    Cascadia_Mono/              <- upstream Cascadia Mono (build inputs)
+      CascadiaMono.ttf                (variable, roman)
+      CascadiaMonoItalic.ttf          (variable, italic)
   rnetonet-Regular.ttf          <- build outputs (committed)
   rnetonet-Bold.ttf
   rnetonet-RegularItalic.ttf
@@ -25,7 +24,7 @@ pipeline/
 
 ```sh
 python pipeline/build.py       # instance + rebrand -> rnetonet/rnetonet-*.ttf
-python pipeline/validate.py    # OTS + structural/RIBBI + ligatures + fontbakery gate
+python pipeline/validate.py    # OTS + structural/RIBBI + fontbakery gate
 ```
 
 Both scripts resolve the repo root from their own location, so they run from any working
@@ -37,31 +36,23 @@ Per style, in a single pass (so no later step can orphan a name record):
 
 | Source (variable) | `wght` pinned | Output | usWeightClass |
 |---|---|---|---|
-| `JetBrainsMono[wght].ttf`        | 300 (Light)          | `rnetonet-Regular.ttf`       | 400 |
-| `JetBrainsMono[wght].ttf`        | 350 (Light..Regular) | `rnetonet-Bold.ttf`          | 700 |
-| `JetBrainsMono-Italic[wght].ttf` | 300 (Light)          | `rnetonet-RegularItalic.ttf` | 400 |
-| `JetBrainsMono-Italic[wght].ttf` | 350 (Light..Regular) | `rnetonet-BoldItalic.ttf`    | 700 |
+| `CascadiaMono.ttf`       | 300 (Light)     | `rnetonet-Regular.ttf`       | 400 |
+| `CascadiaMono.ttf`       | 350 (SemiLight) | `rnetonet-Bold.ttf`          | 700 |
+| `CascadiaMonoItalic.ttf` | 300 (Light)     | `rnetonet-RegularItalic.ttf` | 400 |
+| `CascadiaMonoItalic.ttf` | 350 (SemiLight) | `rnetonet-BoldItalic.ttf`    | 700 |
 
-The Regular is pinned at wght 300 (JetBrains' Light named instance) and the Bold at wght 350 -- a
-custom value between Light (300) and Regular (400); instancing accepts any axis value, not just
-named ones. The Light pin becomes the family Regular and the heavier the Bold. It is a deliberately
-low-contrast pairing (only 50 axis units apart), so the four files bold- and italic-link as one
-RIBBI family.
+The Regular is pinned at Cascadia's Light named instance (wght 300) and the SemiLight instance
+(350) becomes the Bold. It is a deliberately low-contrast pairing (only 50 axis units apart), so
+the four files bold- and italic-link as one RIBBI family.
 
-Each pinned instance is **hinted with ttfautohint** before rebranding. JetBrains' variable fonts
-carry no TrueType instructions (only a `gasp` and a smart-dropout `prep`), so the raw instance is
-effectively unhinted and renders soft on Windows/DirectWrite. ttfautohint adds a full instruction
-set (`fpgm`/`prep`/`cvt` + per-glyph programs on ~99% of non-empty glyphs) tuned aggressively for
-Windows: range 8..96 ppem with no upper limit, Windows-compatibility blue zones, `latin` default
-and fallback scripts (so symbols and box-drawing are hinted too), composite hinting, and stem-width
-snapping that is *strong* for grayscale and GDI ClearType but *quantized* for DirectWrite ClearType
-(VS Code) -- crisp stems without over-thickening the design weight.
-`head.flags` bit 3 (force-integer-ppem) is set so the hints don't misfire at fractional ppem, and a
-`TTFA` table records the exact options used. This roughly doubles each file (~200 KB -> ~420 KB).
-
-Glyph outlines and layout tables (`GSUB`/`GPOS`, hence the `calt`/`liga` **ligatures**) pass
-through untouched; ttfautohint only adds instructions, and only naming, weight/style flags, STAT
-and vertical metrics are rewritten afterwards.
+Cascadia Mono is already TrueType-instruction hinted (`fpgm`/`prep`/`cvt`/`gasp`), and that hinting
+passes straight through the instancer untouched -- **no ttfautohint pass is applied**. Glyph
+outlines, hinting and layout tables (`GSUB`/`GPOS`) pass through from the pinned instance untouched;
+only naming, weight/style flags, STAT and vertical metrics are rewritten. A 7-byte smart-dropout
+instruction is appended to `prep` (the static Cascadia builds carry it; the variable fonts do not),
+and `head.flags` keeps its integer-PPEM bit since Cascadia is manually hinted. Cascadia Mono has no
+coding ligatures by design (that is the Code cut) -- its GSUB is contextual alternates and stylistic
+sets, whose UI name labels are preserved.
 
 **OFL-1.1 compliance:** copyright (nameID 0), full license text (13), license URL (14) and
 author acknowledgements (8/9) are preserved; the reserved family name is dropped by renaming
@@ -71,21 +62,17 @@ author acknowledgements (8/9) are preserved; the reserved family name is dropped
 
 1. **OTS** — every output must sanitize.
 2. **Structural / RIBBI** — shared family name, subfamilies, weight classes, `fsSelection` /
-   `macStyle` style bits, ttfautohint hinting present (`fpgm`/`prep`/`cvt`/`gasp` + `TTFA` +
-   force-integer-ppem `head.flags` bit + per-glyph instructions on >95% of non-empty glyphs),
-   STAT present, `fvar` gone, smart-dropout present, uniform advance widths (monospace),
+   `macStyle` style bits, integer-PPEM `head.flags` bit (asserted since Cascadia is `fpgm`/`cvt`
+   hinted), STAT present, `fvar` gone, smart-dropout present, uniform advance widths (monospace),
    Windows-only name records, no DSIG.
-3. **Ligatures** — HarfBuzz-shaping coding sequences (`-> => != === >= <=` …) must differ from
-   shaping with ligature features forced off, proving the ligatures still fire.
-4. **fontbakery `check-universal`** — no FAIL beyond a small allowlist inherited from the
-   upstream JetBrains Mono design (`empty_letters`: a few glyphs such as NBSP intentionally have
-   no outline). Any new FAIL fails the run. The allowlist is verified by diffing against
-   instanced-and-hinted controls (same ttfautohint pass, no rebrand): the rebrand introduces zero
-   new FAILs, fixes `no_mac_entries`, and the hinting's `integer_ppem_if_hinted` FAIL is resolved
-   by setting the force-integer-ppem `head.flags` bit.
+3. **fontbakery `check-universal`** — no FAIL beyond a small allowlist inherited from the
+   upstream Cascadia design (`arabic_high_hamza`, `case_mapping`, `family/win_ascent_and_descent`,
+   `nested_components`). Any new FAIL fails the run. The allowlist is verified by diffing against
+   plain-instanced controls: the rebrand introduces zero new FAILs and fixes several the raw
+   instance has (`smart_dropout`, `no_mac_entries`).
 
 Exit code is non-zero if any stage fails, so `validate.py` works as a CI gate.
 
 ### Requirements
 
-`fonttools`, `ttfautohint-py`, `opentype-sanitizer` (`ots`), `fontbakery`, `uharfbuzz`.
+`fonttools`, `opentype-sanitizer` (`ots`), `fontbakery`.
