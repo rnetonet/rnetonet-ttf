@@ -4,16 +4,16 @@
 RIBBI styles are produced by pinning the `wght` axis of JetBrains Mono's variable fonts, so the
 whole family derives from two source files:
 
-    rnetonet/sources/JetBrains_Mono/JetBrainsMono[wght].ttf         @ wght=325 (Light..Regular) -> rnetonet-Regular.ttf        (-> 400)
-    rnetonet/sources/JetBrains_Mono/JetBrainsMono[wght].ttf         @ wght=375 (Light..Regular) -> rnetonet-Bold.ttf           (-> 700)
-    rnetonet/sources/JetBrains_Mono/JetBrainsMono-Italic[wght].ttf  @ wght=325 (Light..Regular) -> rnetonet-RegularItalic.ttf  (-> 400)
-    rnetonet/sources/JetBrains_Mono/JetBrainsMono-Italic[wght].ttf  @ wght=375 (Light..Regular) -> rnetonet-BoldItalic.ttf     (-> 700)
+    rnetonet/sources/JetBrains_Mono/JetBrainsMono[wght].ttf         @ wght=300 (Light)          -> rnetonet-Regular.ttf        (-> 400)
+    rnetonet/sources/JetBrains_Mono/JetBrainsMono[wght].ttf         @ wght=350 (Light..Regular) -> rnetonet-Bold.ttf           (-> 700)
+    rnetonet/sources/JetBrains_Mono/JetBrainsMono-Italic[wght].ttf  @ wght=300 (Light)          -> rnetonet-RegularItalic.ttf  (-> 400)
+    rnetonet/sources/JetBrains_Mono/JetBrainsMono-Italic[wght].ttf  @ wght=350 (Light..Regular) -> rnetonet-BoldItalic.ttf     (-> 700)
 
-The Regular is pinned at wght 325 and the Bold at wght 375 -- both custom values between
-JetBrains' Light (300) and Regular (400) named instances (instancing accepts any axis value, not
-just named ones). The lighter pin ships as the family's Regular (usWeightClass 400) and the
-heavier as its Bold (700). That is a deliberately low-contrast pairing (only 50 axis units apart),
-so the four files still form one RIBBI family that bold- and italic-links correctly.
+The Regular is pinned at wght 300 (JetBrains' Light named instance) and the Bold at wght 350 -- a
+custom value between Light (300) and Regular (400); instancing accepts any axis value, not just
+named ones. The Light pin ships as the family's Regular (usWeightClass 400) and the heavier as its
+Bold (700). That is a deliberately low-contrast pairing (only 50 axis units apart), so the four
+files still form one RIBBI family that bold- and italic-links correctly.
 
 Per style the pipeline is: instance -> **ttfautohint** -> rebrand. JetBrains' variable fonts ship
 without TrueType instructions (no `fpgm`/`cvt`, only a `gasp` and a smart-dropout `prep`), so the
@@ -160,10 +160,10 @@ ITAL = "JetBrainsMono-Italic[wght].ttf"
 
 BUILDS = [
     # src, wght, outfile, subfamily, ps suffix, weightclass, bold, italic, stat wght, stat ital
-    (ROMAN, 325, "rnetonet-Regular.ttf", "Regular", "Regular", 400, False, False, REGULAR_WGHT, ROMAN_ITAL),
-    (ROMAN, 375, "rnetonet-Bold.ttf", "Bold", "Bold", 700, True, False, BOLD_WGHT, ROMAN_ITAL),
-    (ITAL, 325, "rnetonet-RegularItalic.ttf", "Italic", "Italic", 400, False, True, REGULAR_WGHT, ITALIC_ITAL),
-    (ITAL, 375, "rnetonet-BoldItalic.ttf", "Bold Italic", "BoldItalic", 700, True, True, BOLD_WGHT, ITALIC_ITAL),
+    (ROMAN, 300, "rnetonet-Regular.ttf", "Regular", "Regular", 400, False, False, REGULAR_WGHT, ROMAN_ITAL),
+    (ROMAN, 350, "rnetonet-Bold.ttf", "Bold", "Bold", 700, True, False, BOLD_WGHT, ROMAN_ITAL),
+    (ITAL, 300, "rnetonet-RegularItalic.ttf", "Italic", "Italic", 400, False, True, REGULAR_WGHT, ITALIC_ITAL),
+    (ITAL, 350, "rnetonet-BoldItalic.ttf", "Bold Italic", "BoldItalic", 700, True, True, BOLD_WGHT, ITALIC_ITAL),
 ]
 
 

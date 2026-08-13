@@ -37,14 +37,14 @@ Per style, in a single pass (so no later step can orphan a name record):
 
 | Source (variable) | `wght` pinned | Output | usWeightClass |
 |---|---|---|---|
-| `JetBrainsMono[wght].ttf`        | 325 (Light..Regular) | `rnetonet-Regular.ttf`       | 400 |
-| `JetBrainsMono[wght].ttf`        | 375 (Light..Regular) | `rnetonet-Bold.ttf`          | 700 |
-| `JetBrainsMono-Italic[wght].ttf` | 325 (Light..Regular) | `rnetonet-RegularItalic.ttf` | 400 |
-| `JetBrainsMono-Italic[wght].ttf` | 375 (Light..Regular) | `rnetonet-BoldItalic.ttf`    | 700 |
+| `JetBrainsMono[wght].ttf`        | 300 (Light)          | `rnetonet-Regular.ttf`       | 400 |
+| `JetBrainsMono[wght].ttf`        | 350 (Light..Regular) | `rnetonet-Bold.ttf`          | 700 |
+| `JetBrainsMono-Italic[wght].ttf` | 300 (Light)          | `rnetonet-RegularItalic.ttf` | 400 |
+| `JetBrainsMono-Italic[wght].ttf` | 350 (Light..Regular) | `rnetonet-BoldItalic.ttf`    | 700 |
 
-The Regular is pinned at wght 325 and the Bold at wght 375 -- both custom values between JetBrains'
-Light (300) and Regular (400) named instances (instancing accepts any axis value, not just named
-ones). The lighter pin becomes the family Regular and the heavier the Bold. It is a deliberately
+The Regular is pinned at wght 300 (JetBrains' Light named instance) and the Bold at wght 350 -- a
+custom value between Light (300) and Regular (400); instancing accepts any axis value, not just
+named ones. The Light pin becomes the family Regular and the heavier the Bold. It is a deliberately
 low-contrast pairing (only 50 axis units apart), so the four files bold- and italic-link as one
 RIBBI family.
 
