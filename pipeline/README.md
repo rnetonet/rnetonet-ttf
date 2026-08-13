@@ -37,23 +37,25 @@ Per style, in a single pass (so no later step can orphan a name record):
 
 | Source (variable) | `wght` pinned | Output | usWeightClass |
 |---|---|---|---|
-| `JetBrainsMono[wght].ttf`        | 350 (SemiLight) | `rnetonet-Regular.ttf`       | 400 |
-| `JetBrainsMono[wght].ttf`        | 400 (Regular)   | `rnetonet-Bold.ttf`          | 700 |
-| `JetBrainsMono-Italic[wght].ttf` | 350 (SemiLight) | `rnetonet-RegularItalic.ttf` | 400 |
-| `JetBrainsMono-Italic[wght].ttf` | 400 (Regular)   | `rnetonet-BoldItalic.ttf`    | 700 |
+| `JetBrainsMono[wght].ttf`        | 325 (Light..Regular) | `rnetonet-Regular.ttf`       | 400 |
+| `JetBrainsMono[wght].ttf`        | 375 (Light..Regular) | `rnetonet-Bold.ttf`          | 700 |
+| `JetBrainsMono-Italic[wght].ttf` | 325 (Light..Regular) | `rnetonet-RegularItalic.ttf` | 400 |
+| `JetBrainsMono-Italic[wght].ttf` | 375 (Light..Regular) | `rnetonet-BoldItalic.ttf`    | 700 |
 
-The Regular is pinned at wght 350 -- a "SemiLight" between JetBrains' Light (300) and Regular
-(400) named instances (instancing accepts any axis value, not just named ones) -- and the Regular
-instance (400) becomes the Bold. It is a deliberately low-contrast pairing (only 50 axis units
-apart), so the four files bold- and italic-link as one RIBBI family.
+The Regular is pinned at wght 325 and the Bold at wght 375 -- both custom values between JetBrains'
+Light (300) and Regular (400) named instances (instancing accepts any axis value, not just named
+ones). The lighter pin becomes the family Regular and the heavier the Bold. It is a deliberately
+low-contrast pairing (only 50 axis units apart), so the four files bold- and italic-link as one
+RIBBI family.
 
 Each pinned instance is **hinted with ttfautohint** before rebranding. JetBrains' variable fonts
 carry no TrueType instructions (only a `gasp` and a smart-dropout `prep`), so the raw instance is
 effectively unhinted and renders soft on Windows/DirectWrite. ttfautohint adds a full instruction
 set (`fpgm`/`prep`/`cvt` + per-glyph programs on ~99% of non-empty glyphs) tuned aggressively for
 Windows: range 8..96 ppem with no upper limit, Windows-compatibility blue zones, `latin` default
-and fallback scripts (so symbols and box-drawing are hinted too), composite hinting, and *strong*
-stem-width snapping for grayscale, GDI **and** DirectWrite ClearType so stems land on whole pixels.
+and fallback scripts (so symbols and box-drawing are hinted too), composite hinting, and stem-width
+snapping that is *strong* for grayscale and GDI ClearType but *quantized* for DirectWrite ClearType
+(VS Code) -- crisp stems without over-thickening the design weight.
 `head.flags` bit 3 (force-integer-ppem) is set so the hints don't misfire at fractional ppem, and a
 `TTFA` table records the exact options used. This roughly doubles each file (~200 KB -> ~420 KB).
 

@@ -4,16 +4,16 @@
 RIBBI styles are produced by pinning the `wght` axis of JetBrains Mono's variable fonts, so the
 whole family derives from two source files:
 
-    rnetonet/sources/JetBrains_Mono/JetBrainsMono[wght].ttf         @ wght=350 (SemiLight) -> rnetonet-Regular.ttf        (-> 400)
-    rnetonet/sources/JetBrains_Mono/JetBrainsMono[wght].ttf         @ wght=400 (Regular)   -> rnetonet-Bold.ttf           (-> 700)
-    rnetonet/sources/JetBrains_Mono/JetBrainsMono-Italic[wght].ttf  @ wght=350 (SemiLight) -> rnetonet-RegularItalic.ttf  (-> 400)
-    rnetonet/sources/JetBrains_Mono/JetBrainsMono-Italic[wght].ttf  @ wght=400 (Regular)   -> rnetonet-BoldItalic.ttf     (-> 700)
+    rnetonet/sources/JetBrains_Mono/JetBrainsMono[wght].ttf         @ wght=325 (Light..Regular) -> rnetonet-Regular.ttf        (-> 400)
+    rnetonet/sources/JetBrains_Mono/JetBrainsMono[wght].ttf         @ wght=375 (Light..Regular) -> rnetonet-Bold.ttf           (-> 700)
+    rnetonet/sources/JetBrains_Mono/JetBrainsMono-Italic[wght].ttf  @ wght=325 (Light..Regular) -> rnetonet-RegularItalic.ttf  (-> 400)
+    rnetonet/sources/JetBrains_Mono/JetBrainsMono-Italic[wght].ttf  @ wght=375 (Light..Regular) -> rnetonet-BoldItalic.ttf     (-> 700)
 
-The Regular is pinned at wght 350 -- a "SemiLight" between JetBrains' Light (300) and Regular
-(400) named instances (instancing accepts any axis value, not just named ones) -- and ships as
-the family's Regular (usWeightClass 400); the Regular instance (wght 400) ships as its Bold
-(700). That is a deliberately low-contrast pairing (only 50 axis units apart), so the four files
-still form one RIBBI family that bold- and italic-links correctly.
+The Regular is pinned at wght 325 and the Bold at wght 375 -- both custom values between
+JetBrains' Light (300) and Regular (400) named instances (instancing accepts any axis value, not
+just named ones). The lighter pin ships as the family's Regular (usWeightClass 400) and the
+heavier as its Bold (700). That is a deliberately low-contrast pairing (only 50 axis units apart),
+so the four files still form one RIBBI family that bold- and italic-links correctly.
 
 Per style the pipeline is: instance -> **ttfautohint** -> rebrand. JetBrains' variable fonts ship
 without TrueType instructions (no `fpgm`/`cvt`, only a `gasp` and a smart-dropout `prep`), so the
@@ -21,8 +21,9 @@ pinned instance is effectively unhinted and leans entirely on the rasterizer -- 
 on Windows/DirectWrite (VS Code). We run ttfautohint over each instance to add a full auto-hinted
 instruction set (fpgm/prep/cvt + per-glyph programs) tuned aggressively for Windows: hinting range
 8..96 ppem with no upper limit, Windows blue zones, latin fallback so symbols/box-drawing are
-hinted too, and *strong* stem-width snapping for grayscale, GDI and DirectWrite ClearType so stems
-land on whole pixels (crispest editor rendering). A `TTFA` table records the exact options used.
+hinted too, *strong* stem-width snapping for grayscale and GDI ClearType, and *quantized* snapping
+for DirectWrite ClearType (VS Code) so stems stay crisp while keeping the design weight faithful.
+A `TTFA` table records the exact options used.
 
 Only after hinting do we rewrite naming, weight/style flags, STAT and vertical metrics. Glyph
 outlines and the layout tables (GSUB/GPOS, hence JetBrains Mono's `calt`/`liga` ligatures) are
@@ -65,10 +66,12 @@ ELIDABLE = 0x2
 WIN_ASCENT, WIN_DESCENT = 1165, 400
 
 # ttfautohint options -- tuned to hint as hard as is sensible for Windows/DirectWrite (VS Code).
-# STRONG stem width on all three rendering targets snaps stems to whole pixels (crispest, at the
-# cost of a slightly heavier look); latin default+fallback extends hinting to symbols/box-drawing;
-# range 8..96 with no upper limit keeps hints live at every size; a TTFA table records the options.
+# STRONG stem width for grayscale and GDI ClearType snaps stems to whole pixels; DirectWrite
+# ClearType (VS Code) uses QUANTIZED so stems stay crisp without over-thickening the design weight;
+# latin default+fallback extends hinting to symbols/box-drawing; range 8..96 with no upper limit
+# keeps hints live at every size; a TTFA table records the options.
 STRONG = StemWidthMode.STRONG
+QUANTIZED = StemWidthMode.QUANTIZED
 TTFAUTOHINT_OPTIONS = dict(
     hinting_range_min=8,
     hinting_range_max=96,
@@ -80,7 +83,7 @@ TTFAUTOHINT_OPTIONS = dict(
     hint_composites=True,
     gray_stem_width_mode=STRONG,
     gdi_cleartype_stem_width_mode=STRONG,
-    dw_cleartype_stem_width_mode=STRONG,
+    dw_cleartype_stem_width_mode=QUANTIZED,
     TTFA_info=True,
 )
 
@@ -157,10 +160,10 @@ ITAL = "JetBrainsMono-Italic[wght].ttf"
 
 BUILDS = [
     # src, wght, outfile, subfamily, ps suffix, weightclass, bold, italic, stat wght, stat ital
-    (ROMAN, 350, "rnetonet-Regular.ttf", "Regular", "Regular", 400, False, False, REGULAR_WGHT, ROMAN_ITAL),
-    (ROMAN, 400, "rnetonet-Bold.ttf", "Bold", "Bold", 700, True, False, BOLD_WGHT, ROMAN_ITAL),
-    (ITAL, 350, "rnetonet-RegularItalic.ttf", "Italic", "Italic", 400, False, True, REGULAR_WGHT, ITALIC_ITAL),
-    (ITAL, 400, "rnetonet-BoldItalic.ttf", "Bold Italic", "BoldItalic", 700, True, True, BOLD_WGHT, ITALIC_ITAL),
+    (ROMAN, 325, "rnetonet-Regular.ttf", "Regular", "Regular", 400, False, False, REGULAR_WGHT, ROMAN_ITAL),
+    (ROMAN, 375, "rnetonet-Bold.ttf", "Bold", "Bold", 700, True, False, BOLD_WGHT, ROMAN_ITAL),
+    (ITAL, 325, "rnetonet-RegularItalic.ttf", "Italic", "Italic", 400, False, True, REGULAR_WGHT, ITALIC_ITAL),
+    (ITAL, 375, "rnetonet-BoldItalic.ttf", "Bold Italic", "BoldItalic", 700, True, True, BOLD_WGHT, ITALIC_ITAL),
 ]
 
 
