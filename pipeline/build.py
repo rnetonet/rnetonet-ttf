@@ -1,32 +1,28 @@
-"""Build the `rnetonet` family by instancing the JetBrains Mono variable fonts.
+"""Build the `rnetonet` family by instancing the Cascadia Code variable fonts.
 
-`rnetonet` is a rebrand of **JetBrains Mono**, with its coding ligatures kept intact. The four
-RIBBI styles are produced by pinning the `wght` axis of JetBrains' variable fonts, so the whole
-family derives from two source files:
+`rnetonet` is a rebrand of **Cascadia Code** (the ligature-carrying cut of Cascadia, kept
+intact). The four RIBBI styles are produced by pinning the `wght` axis of Cascadia Code's
+variable fonts, so the whole family derives from two source files:
 
-    rnetonet/sources/JetBrains_Mono/JetBrainsMono[wght].ttf        @ wght=350 (SemiLight) -> rnetonet-Regular.ttf        (-> 400)
-    rnetonet/sources/JetBrains_Mono/JetBrainsMono[wght].ttf        @ wght=400 (Regular)   -> rnetonet-Bold.ttf           (-> 700)
-    rnetonet/sources/JetBrains_Mono/JetBrainsMono-Italic[wght].ttf @ wght=350 (SemiLight) -> rnetonet-RegularItalic.ttf  (-> 400)
-    rnetonet/sources/JetBrains_Mono/JetBrainsMono-Italic[wght].ttf @ wght=400 (Regular)   -> rnetonet-BoldItalic.ttf     (-> 700)
+    rnetonet/sources/Cascadia_Code/CascadiaCode.ttf        @ wght=300 (Light)     -> rnetonet-Regular.ttf        (-> 400)
+    rnetonet/sources/Cascadia_Code/CascadiaCode.ttf        @ wght=350 (SemiLight) -> rnetonet-Bold.ttf           (-> 700)
+    rnetonet/sources/Cascadia_Code/CascadiaCodeItalic.ttf  @ wght=300 (Light)     -> rnetonet-RegularItalic.ttf  (-> 400)
+    rnetonet/sources/Cascadia_Code/CascadiaCodeItalic.ttf  @ wght=350 (SemiLight) -> rnetonet-BoldItalic.ttf     (-> 700)
 
-The SemiLight instance (wght 350, midway between JetBrains' Light 300 and Regular 400) ships as
-the family's Regular (usWeightClass 400) and the Regular instance as its Bold (700), so the
-four files form one RIBBI family that bold- and italic-links correctly.
+The Light instance (wght 300) ships as the family's Regular (usWeightClass 400) and the
+SemiLight instance (wght 350) as its Bold (700). That is a deliberately low-contrast pairing
+(only 50 axis units apart), so the four files still form one RIBBI family that bold- and
+italic-links correctly.
 
-Everything is one pass -- instancing, naming, STAT, vertical metrics -- so no later step can
-orphan a name record. Glyph outlines and the layout tables (GSUB/GPOS, and therefore JetBrains'
-`calt`/`liga` ligatures) come straight from the pinned instance untouched; only naming,
-weight/style flags, STAT and vertical metrics are rewritten.
-
-Unlike the Cascadia design this replaces, JetBrains Mono is not fpgm/cvt-hinted -- it relies on
-`gasp` smoothing plus a smart-dropout `prep` (both already present in the source and passed
-through). So this build does NOT force head.flags bit 3 (integer PPEM), which only applies to
-manually hinted fonts.
+Everything is one pass -- instancing, naming, STAT, vertical metrics, smart-dropout patch --
+so no later step can orphan a name record. Glyph outlines, TrueType hinting (fpgm/prep/cvt/gasp)
+and the layout tables (GSUB/GPOS, hence Cascadia Code's `calt`/`liga` ligatures) come straight
+from the pinned instance untouched; only naming, weight/style flags, STAT and vertical metrics
+are rewritten, plus a 7-byte smart-dropout instruction appended to `prep` (see below).
 
 OFL compliance: copyright (nameID 0), full license (13), license URL (14) and author
-acknowledgements (8/9 -- JetBrains / Philipp Nurullin, Konstantin Bulenkov) are preserved; the
-reserved name is dropped by renaming the family (OFL clause 3) and the trademark line (7) is
-dropped. No license text is altered (clause 5).
+acknowledgements (8/9) are preserved; the reserved name is dropped by renaming the family
+(OFL clause 3) and the trademark line (7) is dropped. No license text is altered (clause 5).
 
 Usage:
     python pipeline/build.py
@@ -43,31 +39,32 @@ from fontTools.varLib import instancer
 # Repo root, resolved from this file so the pipeline runs from any working directory.
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FAMILY = "rnetonet"
-SRC_DIR = os.path.join(REPO, FAMILY, "sources", "JetBrains_Mono")
+SRC_DIR = os.path.join(REPO, FAMILY, "sources", "Cascadia_Code")
 OUT_DIR = os.path.join(REPO, FAMILY)
 WINDOWS = (3, 1, 0x409)
 
 ITALIC, BOLD, REGULAR, USE_TYPO, WWS = 1 << 0, 1 << 5, 1 << 6, 1 << 7, 1 << 8
 ELIDABLE = 0x2
 
-# JetBrains Mono's native vertical metrics (upem 1000), shared across every weight. Kept as the
-# designer set them -- consistent between styles, so line height is stable.
-WIN_ASCENT, WIN_DESCENT = 1165, 400
+# Cascadia Code's native vertical metrics (upem 2048), shared across every weight. Kept as the
+# designer set them so line height is stable across the four styles.
+WIN_ASCENT, WIN_DESCENT = 2226, 480
 
-# Smart-dropout control: PUSHW[] 511; SCANCTRL[]; PUSHB[] 4; SCANTYPE[]. JetBrains' variable
-# fonts already carry exactly this in `prep`, so patch_smart_dropout() is a no-op here; it stays
-# in the pipeline as a guard in case a future source lacks it (as Cascadia's variable did).
+# Smart-dropout control: PUSHW[] 511; SCANCTRL[]; PUSHB[] 4; SCANTYPE[]. Cascadia's static builds
+# carry this in `prep`; the variable fonts do not, so instancing would inherit its absence and
+# fontbakery's `opentype/smart_dropout` would FAIL. We append it once (idempotent) so hinted
+# rendering drops out thin stems the way the static builds do.
 SMART_DROPOUT = bytes([0xB8, 0x01, 0xFF, 0x85, 0xB0, 0x04, 0x8D])
 
-# Names that describe JetBrains Mono and must not survive the rename. 1-6 are rewritten;
-# 7 is the JetBrains trademark line; 16/17 are the typographic family/subfamily; 25 is the
+# Names that describe Cascadia Code and must not survive the rename. 1-6 are rewritten;
+# 7 is the Microsoft trademark line; 16/17 are the typographic family/subfamily; 25 is the
 # variations PostScript name prefix (dead once instanced).
 DROP_IDS = {1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 20, 21, 22, 25}
 
 # IDs 256+ hold both the variable-axis / named-instance labels (dead once instanced) and the
-# stylistic-set UI labels that GSUB still points at (JetBrains Mono has several). Dropping the
-# whole range would orphan the latter, so collect what the layout tables reference and keep
-# exactly those -- this is also what preserves the ligature/stylistic-set feature UI.
+# stylistic-set UI labels that GSUB still points at. Dropping the whole range would orphan the
+# latter, so collect what the layout tables reference and keep exactly those -- this is also
+# what preserves the ligature/stylistic-set feature UI.
 FEATURE_NAME_ATTRS = (
     "UINameID",
     "FeatUILabelNameID",
@@ -113,15 +110,15 @@ BOLD_WGHT = dict(value=700, name="Bold")
 ROMAN_ITAL = dict(value=0, name="Roman", flags=ELIDABLE, linkedValue=1)
 ITALIC_ITAL = dict(value=1, name="Italic")
 
-ROMAN = "JetBrainsMono[wght].ttf"
-ITAL = "JetBrainsMono-Italic[wght].ttf"
+ROMAN = "CascadiaCode.ttf"
+ITAL = "CascadiaCodeItalic.ttf"
 
 BUILDS = [
     # src, wght, outfile, subfamily, ps suffix, weightclass, bold, italic, stat wght, stat ital
-    (ROMAN, 350, "rnetonet-Regular.ttf", "Regular", "Regular", 400, False, False, REGULAR_WGHT, ROMAN_ITAL),
-    (ROMAN, 400, "rnetonet-Bold.ttf", "Bold", "Bold", 700, True, False, BOLD_WGHT, ROMAN_ITAL),
-    (ITAL, 350, "rnetonet-RegularItalic.ttf", "Italic", "Italic", 400, False, True, REGULAR_WGHT, ITALIC_ITAL),
-    (ITAL, 400, "rnetonet-BoldItalic.ttf", "Bold Italic", "BoldItalic", 700, True, True, BOLD_WGHT, ITALIC_ITAL),
+    (ROMAN, 300, "rnetonet-Regular.ttf", "Regular", "Regular", 400, False, False, REGULAR_WGHT, ROMAN_ITAL),
+    (ROMAN, 350, "rnetonet-Bold.ttf", "Bold", "Bold", 700, True, False, BOLD_WGHT, ROMAN_ITAL),
+    (ITAL, 300, "rnetonet-RegularItalic.ttf", "Italic", "Italic", 400, False, True, REGULAR_WGHT, ITALIC_ITAL),
+    (ITAL, 350, "rnetonet-BoldItalic.ttf", "Bold Italic", "BoldItalic", 700, True, True, BOLD_WGHT, ITALIC_ITAL),
 ]
 
 
@@ -166,6 +163,9 @@ def main():
         os2.panose.bWeight = 8 if bold else 5
 
         head.macStyle = (head.macStyle & ~0b11) | (0b1 if bold else 0) | (0b10 if italic else 0)
+        # TrueType-hinted (fpgm/prep/cvt) -> PPEM must round to integers: keep head.flags bit 3
+        # (Cascadia already sets it; kept explicit and idempotent).
+        head.flags |= 1 << 3
 
         os2.usWinAscent, os2.usWinDescent = WIN_ASCENT, WIN_DESCENT
 
@@ -190,7 +190,7 @@ def main():
         font.save(os.path.join(OUT_DIR, out))
         prep_len = len(font["prep"].program.getBytecode()) if "prep" in font else 0
         print(
-            f"{src:<28} @wght={wght} -> {out:<28} w={weight_class} "
+            f"{src:<24} @wght={wght} -> {out:<28} w={weight_class} "
             f"typo={'Y' if os2.fsSelection & USE_TYPO else 'n'} "
             f"win={os2.usWinAscent}/{os2.usWinDescent} names={len(name.names)} "
             f"prep={prep_len} fvar={'fvar' in font}"
