@@ -13,15 +13,11 @@ Four stages, each of which can fail the run (non-zero exit) so this doubles as a
 4. fontbakery `check-universal` must surface no FAIL beyond the known inherited set
    (EXPECTED_FAILS). Any *new* FAIL fails the run; the expected one is reported but tolerated.
 
-The EXPECTED_FAILS are inherited from the upstream Cascadia design, not regressions introduced
-by the rebrand -- verified by diffing against plain-instanced controls, where the rebrand
-introduces zero new FAILs and in fact fixes several the raw instance has (smart_dropout,
-no_mac_entries, fsselection, mac_style):
+The EXPECTED_FAILS are inherited from the upstream JetBrains Mono design, not regressions
+introduced by the rebrand -- verified by diffing against plain-instanced controls, where the
+rebrand introduces zero new FAILs and in fact fixes the one the raw instance has (no_mac_entries):
 
-    arabic_high_hamza              upstream glyph-composition choice in Cascadia
-    case_mapping                   upstream: a few cased glyphs lack round-trip case pairs
-    family/win_ascent_and_descent  upstream: native win metrics don't cover the full glyph bbox
-    nested_components              upstream: composite glyphs reference other composites
+    empty_letters                  upstream: a few glyphs (e.g. NBSP) intentionally have no outline
 
 Usage:
     python pipeline/validate.py
@@ -45,13 +41,10 @@ OUT_DIR = os.path.join(REPO, FAMILY)
 ITALIC, BOLD, REGULAR, USE_TYPO, WWS = 1 << 0, 1 << 5, 1 << 6, 1 << 7, 1 << 8
 SMART_DROPOUT = bytes([0xB8, 0x01, 0xFF, 0x85, 0xB0, 0x04, 0x8D])
 
-# FAILs known to come from the upstream Cascadia design, keyed by fontbakery check id. Anything
-# not in here is treated as a regression. See the module docstring for how this set is verified.
+# FAILs known to come from the upstream JetBrains Mono design, keyed by fontbakery check id.
+# Anything not in here is treated as a regression. See the module docstring for how it's verified.
 EXPECTED_FAILS = {
-    "arabic_high_hamza",
-    "case_mapping",
-    "family/win_ascent_and_descent",
-    "nested_components",
+    "empty_letters",
 }
 
 # Coding sequences whose shaping should change when ligatures fire (used by stage_ligatures).
