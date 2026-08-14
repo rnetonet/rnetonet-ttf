@@ -36,13 +36,13 @@ Per style, in a single pass (so no later step can orphan a name record):
 
 | Source (variable) | `wght` pinned | Output | usWeightClass |
 |---|---|---|---|
-| `CascadiaMono.ttf`       | 342 (Light..SemiLight)   | `rnetonet-Regular.ttf`       | 400 |
-| `CascadiaMono.ttf`       | 392 (SemiLight..Regular) | `rnetonet-Bold.ttf`          | 700 |
-| `CascadiaMonoItalic.ttf` | 342 (Light..SemiLight)   | `rnetonet-RegularItalic.ttf` | 400 |
-| `CascadiaMonoItalic.ttf` | 392 (SemiLight..Regular) | `rnetonet-BoldItalic.ttf`    | 700 |
+| `CascadiaMono.ttf`       | 341 (Light..SemiLight)   | `rnetonet-Regular.ttf`       | 400 |
+| `CascadiaMono.ttf`       | 391 (SemiLight..Regular) | `rnetonet-Bold.ttf`          | 700 |
+| `CascadiaMonoItalic.ttf` | 341 (Light..SemiLight)   | `rnetonet-RegularItalic.ttf` | 400 |
+| `CascadiaMonoItalic.ttf` | 391 (SemiLight..Regular) | `rnetonet-BoldItalic.ttf`    | 700 |
 
-The Regular is pinned at wght 342 -- between Cascadia's Light (300) and SemiLight (350) named
-instances (instancing accepts any axis value, not just named ones) -- and wght 392, between
+The Regular is pinned at wght 341 -- between Cascadia's Light (300) and SemiLight (350) named
+instances (instancing accepts any axis value, not just named ones) -- and wght 391, between
 SemiLight (350) and Regular (400), becomes the Bold. It is a deliberately low-contrast pairing
 (only 50 axis units apart), so the four files bold- and italic-link as one RIBBI family.
 
