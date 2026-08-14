@@ -4,14 +4,14 @@
 styles are produced by pinning the `wght` axis of Cascadia Mono's variable fonts, so the whole
 family derives from two source files:
 
-    rnetonet/sources/Cascadia_Mono/CascadiaMono.ttf        @ wght=345 (Light..SemiLight)   -> rnetonet-Regular.ttf        (-> 400)
-    rnetonet/sources/Cascadia_Mono/CascadiaMono.ttf        @ wght=395 (SemiLight..Regular) -> rnetonet-Bold.ttf           (-> 700)
-    rnetonet/sources/Cascadia_Mono/CascadiaMonoItalic.ttf  @ wght=345 (Light..SemiLight)   -> rnetonet-RegularItalic.ttf  (-> 400)
-    rnetonet/sources/Cascadia_Mono/CascadiaMonoItalic.ttf  @ wght=395 (SemiLight..Regular) -> rnetonet-BoldItalic.ttf     (-> 700)
+    rnetonet/sources/Cascadia_Mono/CascadiaMono.ttf        @ wght=343 (Light..SemiLight)   -> rnetonet-Regular.ttf        (-> 400)
+    rnetonet/sources/Cascadia_Mono/CascadiaMono.ttf        @ wght=393 (SemiLight..Regular) -> rnetonet-Bold.ttf           (-> 700)
+    rnetonet/sources/Cascadia_Mono/CascadiaMonoItalic.ttf  @ wght=343 (Light..SemiLight)   -> rnetonet-RegularItalic.ttf  (-> 400)
+    rnetonet/sources/Cascadia_Mono/CascadiaMonoItalic.ttf  @ wght=393 (SemiLight..Regular) -> rnetonet-BoldItalic.ttf     (-> 700)
 
-The Regular is pinned at wght 345 -- between Cascadia's Light (300) and SemiLight (350) named
+The Regular is pinned at wght 343 -- between Cascadia's Light (300) and SemiLight (350) named
 instances (instancing accepts any axis value, not just named ones) -- and ships as the family's
-Regular (usWeightClass 400); wght 395, between SemiLight (350) and Regular (400), ships as its
+Regular (usWeightClass 400); wght 393, between SemiLight (350) and Regular (400), ships as its
 Bold (700). That is a deliberately low-contrast pairing (only 50 axis units apart), so the four
 files still form one RIBBI family that bold- and italic-links correctly.
 
@@ -119,10 +119,10 @@ ITAL = "CascadiaMonoItalic.ttf"
 
 BUILDS = [
     # src, wght, outfile, subfamily, ps suffix, weightclass, bold, italic, stat wght, stat ital
-    (ROMAN, 345, "rnetonet-Regular.ttf", "Regular", "Regular", 400, False, False, REGULAR_WGHT, ROMAN_ITAL),
-    (ROMAN, 395, "rnetonet-Bold.ttf", "Bold", "Bold", 700, True, False, BOLD_WGHT, ROMAN_ITAL),
-    (ITAL, 345, "rnetonet-RegularItalic.ttf", "Italic", "Italic", 400, False, True, REGULAR_WGHT, ITALIC_ITAL),
-    (ITAL, 395, "rnetonet-BoldItalic.ttf", "Bold Italic", "BoldItalic", 700, True, True, BOLD_WGHT, ITALIC_ITAL),
+    (ROMAN, 343, "rnetonet-Regular.ttf", "Regular", "Regular", 400, False, False, REGULAR_WGHT, ROMAN_ITAL),
+    (ROMAN, 393, "rnetonet-Bold.ttf", "Bold", "Bold", 700, True, False, BOLD_WGHT, ROMAN_ITAL),
+    (ITAL, 343, "rnetonet-RegularItalic.ttf", "Italic", "Italic", 400, False, True, REGULAR_WGHT, ITALIC_ITAL),
+    (ITAL, 393, "rnetonet-BoldItalic.ttf", "Bold Italic", "BoldItalic", 700, True, True, BOLD_WGHT, ITALIC_ITAL),
 ]
 
 
