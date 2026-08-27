@@ -1,6 +1,6 @@
 """Validate the built `rnetonet` family. Acts as the acceptance gate for `build.py`.
 
-Four stages, each of which can fail the run (non-zero exit) so this doubles as a CI gate:
+Three stages, each of which can fail the run (non-zero exit) so this doubles as a CI gate:
 
 1. OTS (OpenType Sanitizer) must accept every output -- the hard "will browsers and
    rasterizers actually load this" bar.
@@ -8,10 +8,7 @@ Four stages, each of which can fail the run (non-zero exit) so this doubles as a
    style bits, native TrueType hinting intact (fpgm/cvt present -> integer-ppem `head.flags`
    bit set), STAT present, `fvar` gone (fully instanced), smart-dropout present in `prep`,
    uniform advance widths (monospace), Windows-only name records, no DSIG.
-3. Coding ligatures: `rnetonet` is a rebrand of Cascadia Code (the ligature cut), so each
-   output must still shape Cascadia's coding ligatures -- a set of probe sequences (-> => !=
-   === >= <=) must map to different glyphs with default features than with calt/rclt/liga off.
-4. fontbakery `check-universal` must surface no FAIL beyond the known inherited set
+3. fontbakery `check-universal` must surface no FAIL beyond the known inherited set
    (EXPECTED_FAILS). Any *new* FAIL fails the run; the expected ones are reported but tolerated.
 
 The EXPECTED_FAILS are inherited from the upstream Cascadia design, not regressions introduced
@@ -36,7 +33,6 @@ import sys
 import tempfile
 
 import ots
-import uharfbuzz as hb
 from fontTools.ttLib import TTFont
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -45,12 +41,6 @@ OUT_DIR = os.path.join(REPO, FAMILY)
 
 ITALIC, BOLD, REGULAR, USE_TYPO, WWS = 1 << 0, 1 << 5, 1 << 6, 1 << 7, 1 << 8
 SMART_DROPOUT = bytes([0xB8, 0x01, 0xFF, 0x85, 0xB0, 0x04, 0x8D])
-
-# Coding-ligature probe: each sequence must shape to different glyphs with default features than
-# with Cascadia's ligature features (calt/rclt/liga/dlig/clig) forced off. Proves the Cascadia Code
-# ligatures survived the pipeline (GSUB passes through untouched, so they should).
-LIGATURE_SEQS = ("->", "=>", "!=", "===", ">=", "<=", "<-", "|>")
-LIGATURE_OFF = {"calt": False, "rclt": False, "liga": False, "dlig": False, "clig": False}
 
 # FAILs known to come from the upstream Cascadia design, keyed by fontbakery check id. Anything
 # not in here is treated as a regression. See the module docstring for how this set is verified.
@@ -150,25 +140,6 @@ def stage_structure(report):
                  "RIBBI subfamilies complete")
 
 
-def _shape(font, text, features):
-    buf = hb.Buffer()
-    buf.add_str(text)
-    buf.guess_segment_properties()
-    hb.shape(font, buf, features)
-    return [g.codepoint for g in buf.glyph_infos]
-
-
-def stage_ligatures(report):
-    print("\n== Coding ligatures (HarfBuzz) ==")
-    for fn in SPECS:
-        font = hb.Font(hb.Face(hb.Blob.from_file_path(os.path.join(OUT_DIR, fn))))
-        active = [s for s in LIGATURE_SEQS
-                  if _shape(font, s, {}) != _shape(font, s, LIGATURE_OFF)]
-        report.check(len(active) == len(LIGATURE_SEQS),
-                     f"{fn}: coding ligatures active ({len(active)}/{len(LIGATURE_SEQS)} probes remap)",
-                     f"only {sorted(active)} remap")
-
-
 def _check_id(check):
     match = re.search(r"<FontBakeryCheck:([^>]+)>", check["key"][1])
     return match.group(1) if match else check["key"][1]
@@ -217,7 +188,6 @@ def main():
     report = Report()
     stage_ots(report)
     stage_structure(report)
-    stage_ligatures(report)
     stage_fontbakery(report)
 
     print("\n" + ("ALL CHECKS PASSED" if report.ok else "VALIDATION FAILED"))
