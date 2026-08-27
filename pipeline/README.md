@@ -35,15 +35,16 @@ Per style, in a single pass (so no later step can orphan a name record):
 
 | Source (variable) | `wght` pinned | Output | usWeightClass |
 |---|---|---|---|
-| `CascadiaCode.ttf`       | 325 (Light..SemiLight) | `rnetonet-Regular.ttf`       | 400 |
-| `CascadiaCode.ttf`       | 350 (SemiLight)        | `rnetonet-Bold.ttf`          | 700 |
-| `CascadiaCodeItalic.ttf` | 325 (Light..SemiLight) | `rnetonet-RegularItalic.ttf` | 400 |
-| `CascadiaCodeItalic.ttf` | 350 (SemiLight)        | `rnetonet-BoldItalic.ttf`    | 700 |
+| `CascadiaCode.ttf`       | 337.5 (Light..SemiLight)   | `rnetonet-Regular.ttf`       | 400 |
+| `CascadiaCode.ttf`       | 362.5 (SemiLight..Regular) | `rnetonet-Bold.ttf`          | 700 |
+| `CascadiaCodeItalic.ttf` | 337.5 (Light..SemiLight)   | `rnetonet-RegularItalic.ttf` | 400 |
+| `CascadiaCodeItalic.ttf` | 362.5 (SemiLight..Regular) | `rnetonet-BoldItalic.ttf`    | 700 |
 
-The Regular is pinned at wght 325 -- midway between Cascadia's Light (300) and SemiLight (350)
-named instances (instancing accepts any axis value, not just named ones) -- and the SemiLight
-instance (wght 350) becomes the Bold. It is a deliberately low-contrast pairing (only 25 axis
-units apart), so the four files bold- and italic-link as one RIBBI family.
+The Regular is pinned at wght 337.5 -- between Cascadia's Light (300) and SemiLight (350) named
+instances, just below SemiLight (instancing accepts any axis value, not just named ones) -- and
+the Bold at wght 362.5, just above SemiLight toward Regular (400). It is a deliberately
+low-contrast pairing (only 25 axis units apart), so the four files bold- and italic-link as one
+RIBBI family.
 
 Cascadia Code is already TrueType-instruction hinted (`fpgm`/`prep`/`cvt`/`gasp`), and that hinting
 passes straight through the instancer untouched -- **no ttfautohint pass is applied**. Glyph
