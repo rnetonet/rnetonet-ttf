@@ -1,16 +1,15 @@
 # rnetonet build pipeline
 
 Two scripts that reproduce and verify the `rnetonet` font family from its upstream sources.
-The family is a rebrand of **Cascadia Mono** -- the ligature-free cut of Cascadia. The four RIBBI
-styles are produced by pinning the `wght` axis of Cascadia Mono's variable fonts, so the whole
-family derives from two source files.
+The family is a rebrand of **Cascadia Code** -- the cut of Cascadia that ships coding ligatures.
+The four RIBBI styles are produced by pinning the `wght` axis of Cascadia Code's variable fonts,
+so the whole family derives from two source files.
 
 ```
 rnetonet/
-  sources/
-    Cascadia_Mono/              <- upstream Cascadia Mono (build inputs)
-      CascadiaMono.ttf                (variable, roman)
-      CascadiaMonoItalic.ttf          (variable, italic)
+  sources/                      <- upstream Cascadia Code (build inputs)
+    CascadiaCode.ttf                  (variable, roman)
+    CascadiaCodeItalic.ttf            (variable, italic)
   rnetonet-Regular.ttf          <- build outputs (committed)
   rnetonet-Bold.ttf
   rnetonet-RegularItalic.ttf
@@ -36,23 +35,24 @@ Per style, in a single pass (so no later step can orphan a name record):
 
 | Source (variable) | `wght` pinned | Output | usWeightClass |
 |---|---|---|---|
-| `CascadiaMono.ttf`       | 350 (SemiLight) | `rnetonet-Regular.ttf`       | 400 |
-| `CascadiaMono.ttf`       | 400 (Regular)   | `rnetonet-Bold.ttf`          | 700 |
-| `CascadiaMonoItalic.ttf` | 350 (SemiLight) | `rnetonet-RegularItalic.ttf` | 400 |
-| `CascadiaMonoItalic.ttf` | 400 (Regular)   | `rnetonet-BoldItalic.ttf`    | 700 |
+| `CascadiaCode.ttf`       | 325 (Light..SemiLight) | `rnetonet-Regular.ttf`       | 400 |
+| `CascadiaCode.ttf`       | 350 (SemiLight)        | `rnetonet-Bold.ttf`          | 700 |
+| `CascadiaCodeItalic.ttf` | 325 (Light..SemiLight) | `rnetonet-RegularItalic.ttf` | 400 |
+| `CascadiaCodeItalic.ttf` | 350 (SemiLight)        | `rnetonet-BoldItalic.ttf`    | 700 |
 
-The Regular is pinned at Cascadia's SemiLight named instance (wght 350) and the Regular
-instance (wght 400) becomes the Bold. It is a deliberately low-contrast pairing (only 50 axis
+The Regular is pinned at wght 325 -- midway between Cascadia's Light (300) and SemiLight (350)
+named instances (instancing accepts any axis value, not just named ones) -- and the SemiLight
+instance (wght 350) becomes the Bold. It is a deliberately low-contrast pairing (only 25 axis
 units apart), so the four files bold- and italic-link as one RIBBI family.
 
-Cascadia Mono is already TrueType-instruction hinted (`fpgm`/`prep`/`cvt`/`gasp`), and that hinting
+Cascadia Code is already TrueType-instruction hinted (`fpgm`/`prep`/`cvt`/`gasp`), and that hinting
 passes straight through the instancer untouched -- **no ttfautohint pass is applied**. Glyph
 outlines, hinting and layout tables (`GSUB`/`GPOS`) pass through from the pinned instance untouched;
 only naming, weight/style flags, STAT and vertical metrics are rewritten. A 7-byte smart-dropout
 instruction is appended to `prep` (the static Cascadia builds carry it; the variable fonts do not),
-and `head.flags` keeps its integer-PPEM bit since Cascadia is manually hinted. Cascadia Mono has no
-coding ligatures by design (that is the Code cut) -- its GSUB is contextual alternates and stylistic
-sets, whose UI name labels are preserved.
+and `head.flags` keeps its integer-PPEM bit since Cascadia is manually hinted. Cascadia Code's
+coding ligatures (`calt`/`rclt`/`rlig`) live in that untouched GSUB, so they survive intact, along
+with the contextual alternates and stylistic sets whose UI name labels are preserved.
 
 **OFL-1.1 compliance:** copyright (nameID 0), full license text (13), license URL (14) and
 author acknowledgements (8/9) are preserved; the reserved family name is dropped by renaming
@@ -65,7 +65,10 @@ author acknowledgements (8/9) are preserved; the reserved family name is dropped
    `macStyle` style bits, integer-PPEM `head.flags` bit (asserted since Cascadia is `fpgm`/`cvt`
    hinted), STAT present, `fvar` gone, smart-dropout present, uniform advance widths (monospace),
    Windows-only name records, no DSIG.
-3. **fontbakery `check-universal`** — no FAIL beyond a small allowlist inherited from the
+3. **Coding ligatures** — each output still shapes Cascadia's coding ligatures: probe sequences
+   (`-> => != === >= <= <- |>`) must map to different glyphs with default features than with
+   `calt`/`rclt`/`liga` off (HarfBuzz), proving the passed-through GSUB kept them.
+4. **fontbakery `check-universal`** — no FAIL beyond a small allowlist inherited from the
    upstream Cascadia design (`arabic_high_hamza`, `case_mapping`, `family/win_ascent_and_descent`,
    `nested_components`). Any new FAIL fails the run. The allowlist is verified by diffing against
    plain-instanced controls: the rebrand introduces zero new FAILs and fixes several the raw
@@ -75,4 +78,4 @@ Exit code is non-zero if any stage fails, so `validate.py` works as a CI gate.
 
 ### Requirements
 
-`fonttools`, `opentype-sanitizer` (`ots`), `fontbakery`.
+`fonttools`, `opentype-sanitizer` (`ots`), `fontbakery`, `uharfbuzz`.

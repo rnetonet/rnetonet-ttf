@@ -1,27 +1,28 @@
-"""Build the `rnetonet` family by instancing the Cascadia Mono variable fonts.
+"""Build the `rnetonet` family by instancing the Cascadia Code variable fonts.
 
-`rnetonet` is a rebrand of **Cascadia Mono** -- the ligature-free cut of Cascadia. The four RIBBI
-styles are produced by pinning the `wght` axis of Cascadia Mono's variable fonts, so the whole
-family derives from two source files:
+`rnetonet` is a rebrand of **Cascadia Code** -- the cut of Cascadia that ships coding ligatures.
+The four RIBBI styles are produced by pinning the `wght` axis of Cascadia Code's variable fonts,
+so the whole family derives from two source files:
 
-    rnetonet/sources/Cascadia_Mono/CascadiaMono.ttf        @ wght=350 (SemiLight) -> rnetonet-Regular.ttf        (-> 400)
-    rnetonet/sources/Cascadia_Mono/CascadiaMono.ttf        @ wght=400 (Regular)   -> rnetonet-Bold.ttf           (-> 700)
-    rnetonet/sources/Cascadia_Mono/CascadiaMonoItalic.ttf  @ wght=350 (SemiLight) -> rnetonet-RegularItalic.ttf  (-> 400)
-    rnetonet/sources/Cascadia_Mono/CascadiaMonoItalic.ttf  @ wght=400 (Regular)   -> rnetonet-BoldItalic.ttf     (-> 700)
+    rnetonet/sources/CascadiaCode.ttf        @ wght=325 (Light..SemiLight) -> rnetonet-Regular.ttf        (-> 400)
+    rnetonet/sources/CascadiaCode.ttf        @ wght=350 (SemiLight)        -> rnetonet-Bold.ttf           (-> 700)
+    rnetonet/sources/CascadiaCodeItalic.ttf  @ wght=325 (Light..SemiLight) -> rnetonet-RegularItalic.ttf  (-> 400)
+    rnetonet/sources/CascadiaCodeItalic.ttf  @ wght=350 (SemiLight)        -> rnetonet-BoldItalic.ttf     (-> 700)
 
-The Regular is pinned at Cascadia's SemiLight named instance (wght 350) and ships as the
-family's Regular (usWeightClass 400); the Regular instance (wght 400) ships as its Bold (700).
-That is a deliberately low-contrast pairing (only 50 axis units apart), so the four files still
+The Regular is pinned at wght 325 -- midway between Cascadia's Light (300) and SemiLight (350)
+named instances (instancing accepts any axis value, not just named ones) -- and ships as the
+family's Regular (usWeightClass 400); the SemiLight instance (wght 350) ships as its Bold (700).
+That is a deliberately low-contrast pairing (only 25 axis units apart), so the four files still
 form one RIBBI family that bold- and italic-links correctly.
 
-Cascadia Mono is already TrueType-instruction hinted (fpgm/prep/cvt/gasp), and that hinting passes
+Cascadia Code is already TrueType-instruction hinted (fpgm/prep/cvt/gasp), and that hinting passes
 straight through the instancer untouched -- no ttfautohint pass is needed or wanted. Everything is
 one pass -- instancing, naming, STAT, vertical metrics, smart-dropout patch -- so no later step can
 orphan a name record. Glyph outlines, hinting and the layout tables (GSUB/GPOS) come straight from
 the pinned instance untouched; only naming, weight/style flags, STAT and vertical metrics are
-rewritten, plus a 7-byte smart-dropout instruction appended to `prep` (see below). Cascadia Mono
-carries no coding ligatures (that is the Code cut) -- its GSUB is contextual alternates and
-stylistic sets, whose UI name labels are preserved.
+rewritten, plus a 7-byte smart-dropout instruction appended to `prep` (see below). Cascadia Code's
+coding ligatures (calt/rclt/rlig) live in that untouched GSUB, so they pass through intact, along
+with the contextual alternates and stylistic sets whose UI name labels are preserved.
 
 OFL compliance: copyright (nameID 0), full license (13), license URL (14) and author
 acknowledgements (8/9) are preserved; the reserved name is dropped by renaming the family
@@ -42,14 +43,14 @@ from fontTools.varLib import instancer
 # Repo root, resolved from this file so the pipeline runs from any working directory.
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FAMILY = "rnetonet"
-SRC_DIR = os.path.join(REPO, FAMILY, "sources", "Cascadia_Mono")
+SRC_DIR = os.path.join(REPO, FAMILY, "sources")
 OUT_DIR = os.path.join(REPO, FAMILY)
 WINDOWS = (3, 1, 0x409)
 
 ITALIC, BOLD, REGULAR, USE_TYPO, WWS = 1 << 0, 1 << 5, 1 << 6, 1 << 7, 1 << 8
 ELIDABLE = 0x2
 
-# Cascadia Mono's native vertical metrics (upem 2048), shared across every weight. Kept as the
+# Cascadia Code's native vertical metrics (upem 2048), shared across every weight. Kept as the
 # designer set them so line height is stable across the four styles.
 WIN_ASCENT, WIN_DESCENT = 2226, 480
 
@@ -59,7 +60,7 @@ WIN_ASCENT, WIN_DESCENT = 2226, 480
 # rendering drops out thin stems the way the static builds do.
 SMART_DROPOUT = bytes([0xB8, 0x01, 0xFF, 0x85, 0xB0, 0x04, 0x8D])
 
-# Names that describe Cascadia Mono and must not survive the rename. 1-6 are rewritten;
+# Names that describe Cascadia Code and must not survive the rename. 1-6 are rewritten;
 # 7 is the Microsoft trademark line; 16/17 are the typographic family/subfamily; 25 is the
 # variations PostScript name prefix (dead once instanced).
 DROP_IDS = {1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 20, 21, 22, 25}
@@ -113,15 +114,15 @@ BOLD_WGHT = dict(value=700, name="Bold")
 ROMAN_ITAL = dict(value=0, name="Roman", flags=ELIDABLE, linkedValue=1)
 ITALIC_ITAL = dict(value=1, name="Italic")
 
-ROMAN = "CascadiaMono.ttf"
-ITAL = "CascadiaMonoItalic.ttf"
+ROMAN = "CascadiaCode.ttf"
+ITAL = "CascadiaCodeItalic.ttf"
 
 BUILDS = [
     # src, wght, outfile, subfamily, ps suffix, weightclass, bold, italic, stat wght, stat ital
-    (ROMAN, 350, "rnetonet-Regular.ttf", "Regular", "Regular", 400, False, False, REGULAR_WGHT, ROMAN_ITAL),
-    (ROMAN, 400, "rnetonet-Bold.ttf", "Bold", "Bold", 700, True, False, BOLD_WGHT, ROMAN_ITAL),
-    (ITAL, 350, "rnetonet-RegularItalic.ttf", "Italic", "Italic", 400, False, True, REGULAR_WGHT, ITALIC_ITAL),
-    (ITAL, 400, "rnetonet-BoldItalic.ttf", "Bold Italic", "BoldItalic", 700, True, True, BOLD_WGHT, ITALIC_ITAL),
+    (ROMAN, 325, "rnetonet-Regular.ttf", "Regular", "Regular", 400, False, False, REGULAR_WGHT, ROMAN_ITAL),
+    (ROMAN, 350, "rnetonet-Bold.ttf", "Bold", "Bold", 700, True, False, BOLD_WGHT, ROMAN_ITAL),
+    (ITAL, 325, "rnetonet-RegularItalic.ttf", "Italic", "Italic", 400, False, True, REGULAR_WGHT, ITALIC_ITAL),
+    (ITAL, 350, "rnetonet-BoldItalic.ttf", "Bold Italic", "BoldItalic", 700, True, True, BOLD_WGHT, ITALIC_ITAL),
 ]
 
 
