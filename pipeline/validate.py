@@ -8,6 +8,10 @@ Three stages, each of which can fail the run (non-zero exit) so this doubles as 
    style bits, native TrueType hinting intact (fpgm/cvt present -> integer-ppem `head.flags`
    bit set), STAT present, `fvar` gone (fully instanced), smart-dropout present in `prep`,
    uniform advance widths (monospace), Windows-only name records, no DSIG.
+   Hinting preservation is asserted rather than assumed: `fpgm`, `gasp` and every per-glyph
+   instruction stream must be byte-identical to the Cascadia source the file was instanced from,
+   and `prep` must equal the source `prep` plus the smart-dropout patch. Only `cvt ` -- the values
+   those instructions act on, interpolated through `cvar` -- may legitimately differ by weight.
 3. fontbakery `check-universal` must surface no FAIL beyond the known inherited set
    (EXPECTED_FAILS). Any *new* FAIL fails the run; the expected ones are reported but tolerated.
 
@@ -38,6 +42,7 @@ from fontTools.ttLib import TTFont
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FAMILY = "rnetonet"
 OUT_DIR = os.path.join(REPO, FAMILY)
+SRC_DIR = os.path.join(REPO, FAMILY, "sources")
 
 ITALIC, BOLD, REGULAR, USE_TYPO, WWS = 1 << 0, 1 << 5, 1 << 6, 1 << 7, 1 << 8
 SMART_DROPOUT = bytes([0xB8, 0x01, 0xFF, 0x85, 0xB0, 0x04, 0x8D])
@@ -51,13 +56,30 @@ EXPECTED_FAILS = {
     "nested_components",
 }
 
-# filename -> expected structural properties
+# filename -> expected structural properties, including the source it was instanced from, so the
+# hinting it inherited can be diffed against that source byte for byte.
 SPECS = {
-    "rnetonet-Regular.ttf": dict(subfamily="Regular", weight=400, bold=False, italic=False),
-    "rnetonet-Bold.ttf": dict(subfamily="Bold", weight=700, bold=True, italic=False),
-    "rnetonet-RegularItalic.ttf": dict(subfamily="Italic", weight=400, bold=False, italic=True),
-    "rnetonet-BoldItalic.ttf": dict(subfamily="Bold Italic", weight=700, bold=True, italic=True),
+    "rnetonet-Regular.ttf": dict(subfamily="Regular", weight=400, bold=False, italic=False,
+                                 source="CascadiaMono.ttf"),
+    "rnetonet-Bold.ttf": dict(subfamily="Bold", weight=700, bold=True, italic=False,
+                              source="CascadiaMono.ttf"),
+    "rnetonet-RegularItalic.ttf": dict(subfamily="Italic", weight=400, bold=False, italic=True,
+                                       source="CascadiaMonoItalic.ttf"),
+    "rnetonet-BoldItalic.ttf": dict(subfamily="Bold Italic", weight=700, bold=True, italic=True,
+                                    source="CascadiaMonoItalic.ttf"),
 }
+
+
+def glyph_instructions(path):
+    """Per-glyph TrueType instruction streams, keyed by glyph name."""
+    font = TTFont(path)
+    glyf = font["glyf"]
+    programs = {}
+    for glyph_name in font.getGlyphOrder():
+        glyph = glyf[glyph_name]
+        glyph.expand(glyf)
+        programs[glyph_name] = bytes(glyph.program.getBytecode()) if hasattr(glyph, "program") else b""
+    return programs
 
 
 class Report:
@@ -124,8 +146,20 @@ def stage_structure(report):
         report.check("STAT" in font, f"{fn}: STAT present")
         report.check("DSIG" not in font, f"{fn}: no DSIG")
 
+        # --- hinting carried over from Cascadia, byte for byte ---------------
+        # The instancer must not touch the instruction streams. Only `cvt ` -- the values those
+        # instructions act on, interpolated through cvar -- may legitimately differ between weights.
+        source = TTFont(os.path.join(SRC_DIR, spec["source"]), lazy=True)
+        for tag in ("fpgm", "gasp"):
+            report.check(font.getTableData(tag) == source.getTableData(tag),
+                         f"{fn}: {tag} byte-identical to {spec['source']}")
         prep = font["prep"].program.getBytecode() if "prep" in font else b""
+        report.check(prep == source["prep"].program.getBytecode() + SMART_DROPOUT,
+                     f"{fn}: prep == source prep + smart-dropout instruction")
         report.check(SMART_DROPOUT in prep, f"{fn}: smart-dropout instruction in prep")
+        report.check(glyph_instructions(path) == glyph_instructions(os.path.join(SRC_DIR, spec["source"])),
+                     f"{fn}: per-glyph TrueType instructions byte-identical to source")
+        report.check("cvt " in font, f"{fn}: cvt present")
 
         widths = {w for w, _ in font["hmtx"].metrics.values() if w > 0}
         report.check(len(widths) == 1, f"{fn}: monospace (uniform advance width)", f"widths={sorted(widths)}")
