@@ -1,29 +1,33 @@
 """Validate the built `rnetonet` family. Acts as the acceptance gate for `build.py`.
 
-Three stages, each of which can fail the run (non-zero exit) so this doubles as a CI gate:
+Four stages, each of which can fail the run (non-zero exit) so this doubles as a CI gate:
 
-1. OTS (OpenType Sanitizer) must accept every output -- the hard "will browsers and
-   rasterizers actually load this" bar.
-2. Structural RIBBI checks: one shared family name, correct subfamilies / weight classes /
-   style bits, native TrueType hinting intact (fpgm/cvt present -> integer-ppem `head.flags`
-   bit set), STAT present, `fvar` gone (fully instanced), smart-dropout present in `prep`,
-   uniform advance widths (monospace), Windows-only name records, no DSIG.
-   Hinting preservation is asserted rather than assumed: `fpgm`, `gasp` and every per-glyph
-   instruction stream must be byte-identical to the Cascadia source the file was instanced from,
-   and `prep` must equal the source `prep` plus the smart-dropout patch. Only `cvt ` -- the values
-   those instructions act on, interpolated through `cvar` -- may legitimately differ by weight.
-3. fontbakery `check-universal` must surface no FAIL beyond the known inherited set
+1. OTS (OpenType Sanitizer) must accept every output -- the hard "will browsers and rasterizers
+   actually load this" bar.
+2. Rebrand scope: `build.py` claims to change metadata and nothing else, and this proves it. Every
+   table except `name`, `OS/2` and `head` must be **byte-identical** to the JetBrains Mono source
+   the file was built from, and `STAT` must be the only table added. That single sweep covers the
+   outlines (`glyf`/`loca`), the whole ttfautohint hinting program (`fpgm`/`prep`/`cvt `/`gasp` and
+   every per-glyph instruction stream), the layout tables that carry the coding ligatures and
+   stylistic sets (`GSUB`/`GPOS`/`GDEF`), plus `cmap`, `hmtx`, `hhea`, `maxp` and `post`. The
+   hinting and outline tables are also called out individually so a failure names the culprit.
+3. Structural RIBBI checks: one shared family name, correct subfamilies / weight classes / style
+   bits, no JetBrains branding left in the identity strings, no NUL bytes smuggled into a name
+   record, integer-PPEM `head.flags` bit, STAT present, `fvar` absent (these are statics),
+   smart-dropout present in `prep`, stylistic-set UI labels still resolving, uniform advance widths
+   (monospace), vertical metrics untouched and consistent across the family, Windows-only name
+   records, no DSIG.
+4. fontbakery `check-universal` must surface no FAIL beyond the known inherited set
    (EXPECTED_FAILS). Any *new* FAIL fails the run; the expected ones are reported but tolerated.
 
-The EXPECTED_FAILS are inherited from the upstream Cascadia design, not regressions introduced
-by the rebrand -- verified by diffing against plain-instanced controls, where the rebrand
-introduces zero new FAILs and in fact fixes several the raw instance has (smart_dropout,
-no_mac_entries):
+The EXPECTED_FAILS are inherited from upstream JetBrains Mono, not regressions introduced by the
+rebrand -- verified by running the same profile over the untouched sources, where the rebrand
+introduces zero new FAILs and zero new WARNs, and in fact fixes two FAILs the sources have
+(`no_mac_entries`, `opentype/STAT/ital_axis`):
 
-    arabic_high_hamza              upstream glyph-composition choice in Cascadia
     case_mapping                   upstream: a few cased glyphs lack round-trip case pairs
-    family/win_ascent_and_descent  upstream: native win metrics don't cover the full glyph bbox
-    nested_components              upstream: composite glyphs reference other composites
+    empty_letters                  upstream: some letter glyphs are intentionally blank
+    family/win_ascent_and_descent  upstream: win metrics don't cover the full glyph bbox
 
 Usage:
     python pipeline/validate.py
@@ -47,39 +51,43 @@ SRC_DIR = os.path.join(REPO, FAMILY, "sources")
 ITALIC, BOLD, REGULAR, USE_TYPO, WWS = 1 << 0, 1 << 5, 1 << 6, 1 << 7, 1 << 8
 SMART_DROPOUT = bytes([0xB8, 0x01, 0xFF, 0x85, 0xB0, 0x04, 0x8D])
 
-# FAILs known to come from the upstream Cascadia design, keyed by fontbakery check id. Anything
-# not in here is treated as a regression. See the module docstring for how this set is verified.
+# Tables `build.py` is allowed to touch. Everything else must survive byte for byte.
+REWRITTEN = {"name", "OS/2", "head"}
+ADDED = {"STAT"}
+
+# Called out separately so a failure says "the hinting moved" rather than just "a table moved".
+HINTING_TABLES = ("fpgm", "prep", "cvt ", "gasp")
+OUTLINE_TABLES = ("glyf", "loca")
+
+# Vertical metric fields that must match the source and each other -- these set line height, so
+# drift between faces would make mixed-weight text jump.
+VERTICAL_METRICS = (
+    ("head", "unitsPerEm"),
+    ("OS/2", "sTypoAscender"), ("OS/2", "sTypoDescender"), ("OS/2", "sTypoLineGap"),
+    ("OS/2", "usWinAscent"), ("OS/2", "usWinDescent"),
+    ("hhea", "ascender"), ("hhea", "descender"), ("hhea", "lineGap"),
+)
+
+# FAILs known to come from upstream JetBrains Mono, keyed by fontbakery check id. Anything not in
+# here is treated as a regression. See the module docstring for how this set is verified.
 EXPECTED_FAILS = {
-    "arabic_high_hamza",
     "case_mapping",
+    "empty_letters",
     "family/win_ascent_and_descent",
-    "nested_components",
 }
 
-# filename -> expected structural properties, including the source it was instanced from, so the
-# hinting it inherited can be diffed against that source byte for byte.
+# filename -> expected structural properties, including the JetBrains Mono file it was rebranded
+# from, so everything the rebrand must not touch can be diffed against it.
 SPECS = {
     "rnetonet-Regular.ttf": dict(subfamily="Regular", weight=400, bold=False, italic=False,
-                                 source="CascadiaMono.ttf"),
+                                 source="JetBrainsMono-Light.ttf"),
     "rnetonet-Bold.ttf": dict(subfamily="Bold", weight=700, bold=True, italic=False,
-                              source="CascadiaMono.ttf"),
+                              source="JetBrainsMono-Regular.ttf"),
     "rnetonet-RegularItalic.ttf": dict(subfamily="Italic", weight=400, bold=False, italic=True,
-                                       source="CascadiaMonoItalic.ttf"),
+                                       source="JetBrainsMono-LightItalic.ttf"),
     "rnetonet-BoldItalic.ttf": dict(subfamily="Bold Italic", weight=700, bold=True, italic=True,
-                                    source="CascadiaMonoItalic.ttf"),
+                                    source="JetBrainsMono-Italic.ttf"),
 }
-
-
-def glyph_instructions(path):
-    """Per-glyph TrueType instruction streams, keyed by glyph name."""
-    font = TTFont(path)
-    glyf = font["glyf"]
-    programs = {}
-    for glyph_name in font.getGlyphOrder():
-        glyph = glyf[glyph_name]
-        glyph.expand(glyf)
-        programs[glyph_name] = bytes(glyph.program.getBytecode()) if hasattr(glyph, "program") else b""
-    return programs
 
 
 class Report:
@@ -105,12 +113,45 @@ def stage_ots(report):
         report.check(result.returncode == 0, f"{fn} sanitizes", detail.strip())
 
 
+def stage_rebrand_scope(report):
+    """Prove the rebrand is metadata-only: only `name`/`OS/2`/`head` differ, only `STAT` is new."""
+    print("\n== Rebrand scope (everything but metadata must be byte-identical) ==")
+    for fn, spec in SPECS.items():
+        font = TTFont(os.path.join(OUT_DIR, fn), lazy=True)
+        source = TTFont(os.path.join(SRC_DIR, spec["source"]), lazy=True)
+        out_tags = set(font.keys()) - {"GlyphOrder"}
+        src_tags = set(source.keys()) - {"GlyphOrder"}
+
+        report.check(out_tags - src_tags == ADDED, f"{fn}: only {sorted(ADDED)} added",
+                     f"added {sorted(out_tags - src_tags)}")
+        report.check(not src_tags - out_tags, f"{fn}: no source table dropped",
+                     f"missing {sorted(src_tags - out_tags)}")
+
+        shared = sorted(out_tags & src_tags)
+        changed = [t for t in shared if font.getTableData(t) != source.getTableData(t)]
+        report.check(set(changed) <= REWRITTEN,
+                     f"{fn}: only {sorted(REWRITTEN)} rewritten vs {spec['source']}",
+                     f"also changed {sorted(set(changed) - REWRITTEN)}")
+
+        # Name the tables that matter most, so a regression reads clearly.
+        for tag in HINTING_TABLES + OUTLINE_TABLES:
+            if tag in src_tags:
+                report.check(font.getTableData(tag) == source.getTableData(tag),
+                             f"{fn}: {tag.strip()} byte-identical to source")
+        for tag in ("GSUB", "GPOS", "GDEF", "cmap", "hmtx", "post"):
+            if tag in src_tags:
+                report.check(font.getTableData(tag) == source.getTableData(tag),
+                             f"{fn}: {tag} byte-identical to source")
+
+
 def stage_structure(report):
     print("\n== Structural / RIBBI ==")
     families = set()
+    metrics_seen = {}
     for fn, spec in SPECS.items():
         path = os.path.join(OUT_DIR, fn)
         font = TTFont(path, lazy=True)
+        source = TTFont(os.path.join(SRC_DIR, spec["source"]), lazy=True)
         name, os2, head = font["name"], font["OS/2"], font["head"]
 
         fam = name.getDebugName(1)
@@ -121,6 +162,21 @@ def stage_structure(report):
         ps = name.getDebugName(6) or ""
         report.check(ps.startswith(f"{FAMILY}-") and " " not in ps,
                      f"{fn}: PostScript name well-formed", f"got {ps!r}")
+
+        # The identity strings must not still say JetBrains; the attribution strings (0, 8, 9,
+        # 11-14) legitimately do and are left alone. nameID 7 is the trademark line and must go.
+        branded = [i for i in (1, 2, 3, 4, 6) if "jetbrains" in (name.getDebugName(i) or "").lower()]
+        report.check(not branded, f"{fn}: no JetBrains branding in identity names",
+                     f"nameIDs {branded} still mention it")
+        report.check(name.getDebugName(7) is None, f"{fn}: trademark record (nameID 7) dropped")
+        report.check(name.getDebugName(0), f"{fn}: copyright (nameID 0) preserved")
+        report.check(name.getDebugName(13), f"{fn}: license (nameID 13) preserved")
+        report.check(name.getDebugName(14), f"{fn}: license URL (nameID 14) preserved")
+
+        # achVendID is NUL-padded ('JB\0\0') and str.strip() does not remove NULs, so a naive
+        # rebrand smuggles them into nameID 3. Guard the whole table.
+        nul = [r.nameID for r in name.names if "\x00" in str(r)]
+        report.check(not nul, f"{fn}: no NUL bytes in name records", f"nameIDs {sorted(set(nul))}")
 
         report.check(os2.usWeightClass == spec["weight"],
                      f"{fn}: usWeightClass == {spec['weight']}", f"got {os2.usWeightClass}")
@@ -137,41 +193,50 @@ def stage_structure(report):
         report.check(bool(mac & 0b01) == spec["bold"], f"{fn}: macStyle bold bit == {spec['bold']}")
         report.check(bool(mac & 0b10) == spec["italic"], f"{fn}: macStyle italic bit == {spec['italic']}")
 
-        # Cascadia is manually hinted (fpgm/cvt), so head.flags bit 3 must be set for PPEM to
-        # round to integers -- otherwise the instructions misfire at fractional sizes.
+        # JetBrains Mono is ttfautohint-hinted (fpgm/cvt), so head.flags bit 3 must be set for
+        # PPEM to round to integers -- otherwise the instructions misfire at fractional sizes.
         if "fpgm" in font or "cvt " in font:
             report.check(bool(head.flags & (1 << 3)), f"{fn}: head.flags integer-ppem bit set (hinted)")
 
-        report.check("fvar" not in font, f"{fn}: fully instanced (no fvar)")
+        report.check("fvar" not in font, f"{fn}: static (no fvar)")
         report.check("STAT" in font, f"{fn}: STAT present")
         report.check("DSIG" not in font, f"{fn}: no DSIG")
 
-        # --- hinting carried over from Cascadia, byte for byte ---------------
-        # The instancer must not touch the instruction streams. Only `cvt ` -- the values those
-        # instructions act on, interpolated through cvar -- may legitimately differ between weights.
-        source = TTFont(os.path.join(SRC_DIR, spec["source"]), lazy=True)
-        for tag in ("fpgm", "gasp"):
-            report.check(font.getTableData(tag) == source.getTableData(tag),
-                         f"{fn}: {tag} byte-identical to {spec['source']}")
+        # Inherited from JetBrains Mono, not patched in -- but still required.
         prep = font["prep"].program.getBytecode() if "prep" in font else b""
-        report.check(prep == source["prep"].program.getBytecode() + SMART_DROPOUT,
-                     f"{fn}: prep == source prep + smart-dropout instruction")
         report.check(SMART_DROPOUT in prep, f"{fn}: smart-dropout instruction in prep")
-        report.check(glyph_instructions(path) == glyph_instructions(os.path.join(SRC_DIR, spec["source"])),
-                     f"{fn}: per-glyph TrueType instructions byte-identical to source")
-        report.check("cvt " in font, f"{fn}: cvt present")
+
+        # The ssXX feature UI labels GSUB points at must still resolve after the 256+ purge.
+        labels = {}
+        feature_list = font["GSUB"].table.FeatureList if "GSUB" in font else None
+        for record in (feature_list.FeatureRecord if feature_list else []):
+            params = record.Feature.FeatureParams
+            ui = getattr(params, "UINameID", None) if params else None
+            if ui:
+                labels[record.FeatureTag] = name.getDebugName(ui)
+        report.check(labels and all(labels.values()),
+                     f"{fn}: stylistic-set UI labels preserved ({len(labels)})",
+                     f"unresolved: {[k for k, v in labels.items() if not v]}")
+
+        for table, field in VERTICAL_METRICS:
+            got, want = getattr(font[table], field), getattr(source[table], field)
+            report.check(got == want, f"{fn}: {table}.{field} unchanged ({want})", f"got {got}")
+        metrics_seen[fn] = tuple(getattr(font[t], f) for t, f in VERTICAL_METRICS)
 
         widths = {w for w, _ in font["hmtx"].metrics.values() if w > 0}
-        report.check(len(widths) == 1, f"{fn}: monospace (uniform advance width)", f"widths={sorted(widths)}")
+        report.check(len(widths) == 1, f"{fn}: monospace (uniform advance width)",
+                     f"widths={sorted(widths)}")
 
         non_windows = [r for r in name.names if r.platformID != 3]
         report.check(not non_windows, f"{fn}: name records Windows-only",
                      f"{len(non_windows)} non-Windows records")
 
-    report.check(families == {FAMILY}, f"single shared family name across all four",
-                 f"got {families}")
+    report.check(families == {FAMILY}, "single shared family name across all four", f"got {families}")
     report.check({SPECS[f]["subfamily"] for f in SPECS} == {"Regular", "Bold", "Italic", "Bold Italic"},
                  "RIBBI subfamilies complete")
+    report.check(len(set(metrics_seen.values())) == 1,
+                 "vertical metrics identical across the family (stable line height)",
+                 f"got {metrics_seen}")
 
 
 def _check_id(check):
@@ -218,9 +283,15 @@ def main():
     if missing:
         print(f"Outputs missing: {missing}\nRun `python pipeline/build.py` first.")
         return 1
+    missing_src = [s["source"] for s in SPECS.values()
+                   if not os.path.exists(os.path.join(SRC_DIR, s["source"]))]
+    if missing_src:
+        print(f"Sources missing: {missing_src}")
+        return 1
 
     report = Report()
     stage_ots(report)
+    stage_rebrand_scope(report)
     stage_structure(report)
     stage_fontbakery(report)
 
