@@ -1,207 +1,131 @@
-"""Build the `rnetonet` family by rebranding the JetBrains Mono static fonts.
+"""Build the `rnetonetcode` and `rnetonetmono` variable families by rebranding Cascadia.
 
-`rnetonet` is a rebrand of **JetBrains Mono**, shifted one step lighter: JetBrains Mono's Light
-ships as the family's Regular, and its Regular ships as the family's Bold.
+Two families, four files, from the four upstream Cascadia variable fonts:
 
-    rnetonet/sources/JetBrainsMono-Light.ttf        (300) -> rnetonet-Regular.ttf        (-> 400)
-    rnetonet/sources/JetBrainsMono-Regular.ttf      (400) -> rnetonet-Bold.ttf           (-> 700)
-    rnetonet/sources/JetBrainsMono-LightItalic.ttf  (300) -> rnetonet-RegularItalic.ttf  (-> 400)
-    rnetonet/sources/JetBrainsMono-Italic.ttf       (400) -> rnetonet-BoldItalic.ttf     (-> 700)
+    rnetonet/sources/CascadiaCode.ttf        -> rnetonetcode-Roman.ttf
+    rnetonet/sources/CascadiaCodeItalic.ttf  -> rnetonetcode-Italic.ttf
+    rnetonet/sources/CascadiaMono.ttf        -> rnetonetmono-Roman.ttf
+    rnetonet/sources/CascadiaMonoItalic.ttf  -> rnetonetmono-Italic.ttf
 
-The sources are already static, so **nothing is instanced or interpolated and no outline is ever
-redrawn**. Two things happen: the fonts are re-hinted -- at stock ttfautohint settings but with a
-latin fallback script, so the symbol glyphs get hinted too -- and the metadata is rebranded.
+`rnetonetcode` is Cascadia Code (programming ligatures in `calt`); `rnetonetmono` is Cascadia
+Mono (the same outlines with the ligature lookups removed -- upstream ships them as separate
+files whose `glyf` and `cmap` are byte-identical and whose `calt` holds 116 lookups vs 1).
 
-Glyph *outlines* come through untouched -- `validate.py` compares every point coordinate against
-the source -- as do the layout tables that carry the ligatures and stylistic sets
-(`GSUB`/`GPOS`/`GDEF`), plus `cmap`, `hmtx`, `hhea`, `post` and `gasp`. What changes:
+This is a **rebranding and default-settings pipeline**. Nothing is redrawn and nothing is
+re-hinted: the outlines, the TrueType hinting (`fpgm`/`prep`/`cvt `/`cvar` and every glyph's
+instruction stream) and the layout tables come from upstream untouched. Two things happen.
 
-    fpgm/prep/cvt   re-hinted; `cvt ` gains entries from the control instruction (see HINT_OPTIONS)
-    glyf            re-hinted -- instruction streams only; coordinates are identical
-    TTFA            added by ttfautohint -- records every parameter used, so the hinting is auditable
-    name            rebranded, plus the ttfautohint version stamp in nameID 5
-    OS/2            usWeightClass, fsSelection style bits
-    head            macStyle style bits
-    STAT            added -- the sources ship none, and a RIBBI family should declare its axis positions
+1. THE WEIGHT AXIS IS CUT DOWN TO TWO WEIGHTS AND RELABELLED.
 
-Upstream JetBrains Mono 2.304 is hinted with **stock ttfautohint defaults** -- verified, not
-assumed: re-running ttfautohint with no options reproduces its `fpgm`, `prep`, `cvt ` and `glyf`
-byte for byte, even though the ttfautohint here (1.8.4.16-eb64) is a newer build than the one
-upstream used (1.8.4.7-5d5b). One default is wrong for a coding font -- `fallback-script=none`
-leaves every box-drawing and block glyph unhinted -- so that is the single parameter this build
-changes on its own. The second departure is a control instruction, `* dflt width 74`, which nudges
-the standard stem width three units above the 71 ttfautohint measures from the outlines -- a
-preference, not a fix, argued out in HINT_OPTIONS below. Both
-stem width modes have been moved and moved back; HINT_OPTIONS below records why, and documents the
-one dial that is actually fine-grained. The smart-dropout instruction and the integer-PPEM
-`head.flags` bit survive re-hinting, so there is still no dropout patch to apply.
+   Upstream's `wght` runs 200-400-700 with six named instances. This family ships one step
+   lighter, the same premise the JetBrains-based `rnetonet` had: Cascadia's Light is our
+   Regular and Cascadia's SemiLight is our Bold.
 
-Vertical metrics (typo 1020/-300/0, win 1020/300, upem 1000) are identical across all four faces
-and are kept exactly as shipped, so line height is stable across the family.
+       source wght 300 (Light)      -> output wght 400 (Regular)  -- also the new default
+       source wght 350 (SemiLight)  -> output wght 700 (Bold)
 
-JetBrains Mono's coding ligatures are carried over untouched: they live in `calt`, which stays as
-shipped, so `-> => != ===` still render as ligatures. The `cvXX` character variants and `ssXX`
-stylistic sets survive too, including the UI name labels `GSUB` points at (nameIDs 256-259:
-"Classic construction", "Closed construction", "Broken equals ligatures", "Rased bar f") -- those
-are found by walking the layout tables rather than being hardcoded.
+   Step one is `instancer.instantiateVariableFont` with a *range* limit, `wght=(300, 300, 350)`.
+   That keeps the font variable, restricts the axis to the 300-350 span, and moves the default
+   onto 300 -- so `glyf` now holds the Light outlines, `cvt ` holds the Light control values
+   rebased through `cvar`, and `gvar`/`HVAR`/`GDEF` carry only the deltas that reach from Light
+   to SemiLight.
 
-OFL compliance: copyright (nameID 0), full license (13), license URL (14) and author
-acknowledgements (8/9, plus vendor/designer URLs 11/12) are preserved; the family is renamed
-(JetBrains Mono carries no Reserved Font Name, so clause 3 does not bite, but the rename makes the
-derivative unmistakable) and the trademark line (7) is dropped since the result is not JetBrains
-Mono. No license text is altered (clause 5).
+   Step two is the relabel: `fvar`'s user-space endpoints are rewritten from 300/300/350 to
+   400/400/700. This is pure relabelling and cannot move an outline. Variation deltas live in
+   *normalised* space (-1..1) and `avar` maps normalised to normalised; the only thing an
+   `fvar` min/default/max triple decides is how a user-space number is projected onto that
+   normalised range. Both triples project 300->0.0 and 350->1.0, so every rendered instance is
+   identical -- `wght=400` renders exactly what `wght=300` did, `wght=700` exactly what 350 did,
+   and `wght=550` the midpoint either way. `validate.py` proves this by instancing both fonts at
+   matched positions and comparing every coordinate.
+
+   Why relabel at all: the family has to *say* Regular and Bold. Left at 300-350 the OS reads a
+   Light family -- `usWeightClass` 300, `font-weight: 400` resolving to the lighter end -- and
+   every RIBBI convention in the OpenType stack argues with the file. Relabelled, `font-weight:
+   400` is the Regular, `700` is the Bold, and the span between them stays continuously variable.
+
+   The Regular/Bold contrast this buys is small on purpose: 1.2535x the ink (outline area over
+   the 62 ASCII alphanumerics, source instanced at 350 vs 300). That is *more* contrast than the
+   JetBrains-based family this replaces had at 1.1203, so the light-bold preference that family
+   was tuned around survives the move.
+
+2. THE METADATA IS REBRANDED. Family, subfamily, unique ID, full name, PostScript name and the
+   variations PostScript prefix (nameID 25) are rewritten; `fvar` gets two named instances;
+   `STAT` is rebuilt with a two-value `wght` axis and an `ital` axis; `OS/2` and `head` get the
+   weight class and style bits that go with a Regular default.
+
+What is NOT touched, and is checked table by table in `validate.py`: `glyf` outlines and
+instruction streams (as the same slice of design space), `fpgm`, `prep`, `gasp`, `cmap`, `post`,
+`GSUB` lookups, `GPOS`, vertical metrics (typo 1900/-480/0, win 2226/480, upem 2048 -- identical
+across all four files, so line height is stable across both families), the monospace advance
+(1200), and PANOSE. PANOSE weight stays at 6 (Medium) deliberately: it describes the weight the
+font *declares*, which after the relabel is 400, not the master it was cut from.
+
+Three things do change as a consequence of restricting the axis, each of them correct:
+
+    cvt /cvar   `cvt ` is rebased onto the new default via `cvar`; `cvar` keeps only the
+                Light->SemiLight deltas. The hinting *program* (`fpgm`/`prep`, and every glyph's
+                bytecode) is byte-identical -- only the control values it reads move, which is
+                exactly what a variable font's hinting is supposed to do at a new default.
+    hmtx/hhea   advances stay 1200 everywhere; left side bearings follow the Light outlines, and
+                `hhea`'s derived min/max fields follow the bearings.
+    GSUB rvrn   dropped, with its 2 lookups. `rvrn` is upstream's required-variation feature and
+                its condition sets cover normalised design 0.0-1.0, i.e. `wght` 400-700 in source
+                terms. Our whole range sits at design -0.667..-0.333, below every condition, so
+                the feature could never fire here. `calt`, `rclt`, `rlig`, the `ssXX` sets and
+                every other feature come through with their lookups intact.
+
+OFL compliance: Cascadia ships under an SIL OFL 1.1-based licence. Copyright (nameID 0), the
+full licence (13) and licence URL (14) are preserved verbatim, as are the author/vendor
+acknowledgements (8 "Saja Typeworks", 9 "Aaron Bell", 11/12) -- clause 4 permits exactly that.
+The family is renamed, so clause 3 (Reserved Font Name) cannot bite whether or not Microsoft
+reserved "Cascadia". The trademark line (nameID 7, "Cascadia Code is a trademark of the
+Microsoft group of companies") is dropped, since these files are not Cascadia Code. No licence
+text is altered (clause 5).
+
+Filenames avoid the `Family[wght].ttf` convention on purpose: a literal `[wght]` in a filename
+is a glob bracket expression and quietly breaks shell and Python globbing. `-Roman`/`-Italic`
+mirrors upstream's own `CascadiaCodeRoman` variations prefix and globs cleanly.
 
 Usage:
     python pipeline/build.py
 
-Run `python pipeline/validate.py` afterwards to sanity-check the four outputs.
+Run `python pipeline/validate.py` afterwards to check the four outputs.
 """
 
-import io
 import os
 
 from fontTools.otlLib.builder import buildStatTable
 from fontTools.ttLib import TTFont
-from ttfautohint import ttfautohint
+from fontTools.ttLib.tables._f_v_a_r import NamedInstance
+from fontTools.varLib import instancer
 
 # Repo root, resolved from this file so the pipeline runs from any working directory.
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-FAMILY = "rnetonet"
-SRC_DIR = os.path.join(REPO, FAMILY, "sources")
-OUT_DIR = os.path.join(REPO, FAMILY)
+BRAND = "rnetonet"
+SRC_DIR = os.path.join(REPO, BRAND, "sources")
+OUT_DIR = os.path.join(REPO, BRAND)
 WINDOWS = (3, 1, 0x409)
 
 ITALIC, BOLD, REGULAR, USE_TYPO, WWS = 1 << 0, 1 << 5, 1 << 6, 1 << 7, 1 << 8
 ELIDABLE = 0x2
 
-# ttfautohint parameters. Upstream ships stock defaults; the one departure is the fallback script,
-# plus the info table. Everything else stays at its default -- twice on purpose now, see below.
-#
-#   fallback_script="latn"
-#       The default, "none", means any glyph outside a recognised script gets no hinting at all --
-#       and in this font that is 128 box-drawing glyphs, 32 block elements, 21 arrows, 62 math
-#       symbols and 43 geometric shapes. Exactly the glyphs a terminal draws TUI borders, tables,
-#       tree views and progress bars with. Hinting them against latin blue zones snaps their rules
-#       onto the pixel grid instead of smearing them across two rows. It touches *only* those
-#       glyphs: everything with a real script is hinted identically to upstream. Verified glyph by
-#       glyph rather than assumed -- 1215 of 1743 instruction streams come through byte for byte,
-#       and the 528 that change are box drawing (128), technical (105), math (105), other symbols
-#       (48), arrows (34), blocks (32), geometric (28), plus the letterlike math alphanumerics
-#       (double-struck CHNPQRZ, script l), 12 math brackets/ceilings/floors, one Gujarati digit and
-#       8 unencoded glyphs. No Latin letter, digit or ASCII punctuation mark moves.
-#
-#   *_stem_width_mode
-#       Left at ttfautohint's defaults: QUANTIZED for grayscale and DirectWrite ClearType, STRONG
-#       for GDI ClearType. Both non-GDI ones have now been moved and moved back, in both
-#       directions, and that pair of results is the useful part:
-#           STRONG   (34aed65, reverted in 5bbd30c) +32% fully-saturated ink on letters and digits.
-#                    Measured well; read brittle in daily use.
-#           NATURAL  (ed31a38, reverted here) -1.7%. Too small to notice in daily use, which is the
-#                    finding: the mode switch has nothing useful in its soft half.
-#       So the mode is a coarse switch -- one step too hard, one step indistinguishable -- and both
-#       ends are now spent. Since all three sit at their defaults, none is passed: an unset option
-#       is the honest way to say "stock", and TTFA records the effective values regardless.
-#       ttfautohint emits a `prep` that branches on rendering mode, and it is easy to get backwards
-#       which branch reaches whom:
-#           dw_cleartype  -> FreeType's default v40 interpreter, and DirectWrite. v40 emulates
-#                            ClearType, so this is the one nearly every modern reader gets.
-#           gray          -> only the legacy v35 interpreter (grayscale, full hinting).
-#           gdi_cleartype -> only Windows GDI ClearType.
-#
-#   TTFA_info=True
-#       Writes a TTFA table listing every parameter used, so a built font says how it was hinted.
-#       Upstream ships no such table; this is an audit aid, not a hinting parameter, and it is what
-#       validate.py reads to prove the configuration has not drifted.
-#
-# Re-hinting is a no-op on the hinting tables. Running this ttfautohint (1.8.4.16-eb64, a newer
-# build than the 1.8.4.7-5d5b stamped into the sources) with stock parameters reproduces upstream's
-# fpgm, prep, cvt and glyf byte for byte, on both roman faces. Only fallback_script=latn changes
-# anything at all, and only for the 286 symbol glyphs.
-#
-# Measured on the Light face, as the fraction of ink rendered at full saturation rather than smeared
-# into half-grays, over 9-18 ppem under FreeType's default v40 interpreter (so, the dw branch):
-#                                   symbols   letters+digits   Bold/Regular ink ratio
-#   upstream defaults                0.2962       0.0800               1.1203
-#   fallback_script=latn (ours)      0.3041       0.0800               1.1203
-#   + gray/dw NATURAL (reverted)     0.2978       0.0786               1.1236
-#   + gray/dw STRONG (reverted)      0.3819       0.1059               1.0938
-# So this build buys +2.7% on symbols and leaves letters, digits and weight contrast exactly where
-# upstream has them.
-#
-#   control_buffer="* dflt width 74\n"
-#       The shipped nudge, and the only setting here that is a preference rather than a fix. See
-#       THE FINE DIAL below for what it buys, what it costs, and the case against it.
-#
-# THE FINE DIAL. The stem width *mode* is coarse, but the standard stem width itself is a number,
-# and control instructions can set it:
-#
-#     control_buffer="* dflt width N\n"        (N in font units)
-#
-# ttfautohint auto-detects 71 for JetBrains Mono Light -- verified, not guessed: `width 71` renders
-# identically to leaving it auto (same glyf bytes, same measurements to four decimals). Measured on
-# letters and digits, 9-18 ppem, against that baseline:
-#       66-69     -12% crisp, -1.5% ink        a cliff, not a nudge
-#       70        -3.9% crisp, -0.3% ink       a little softer
-#       71        auto -- what ttfautohint measures from the outlines
-#       74        +2.1% crisp, +0.9% ink       SHIPPED -- the smallest perceptible step up
-#       75-77     +1.9 to +2.7% crisp, +1.3 to +1.9% ink
-#       78-80     +3.7 to +4.0% crisp, +2.5% ink
-#       90+       +14% and up -- back in STRONG territory
-# Two caveats. It is steppy rather than smooth: quantized mode snaps to a set of widths, so 72 and
-# 73 measure slightly *below* 71 rather than above. And it moves weight as well as crispness --
-# roughly +0.3% ink per unit -- so it doubles as a weight trim, which on a Light-based family is
-# not nothing. `latn dflt width N` is NOT a way to spare the symbols, which is the
-# obvious guess and wrong: fallback_script is latn, so the symbol glyphs are hinted *as*
-# latin and take the same width. Measured identical to `* dflt` on letters and symbols
-# alike; at width 76, 15 box-drawing glyphs change under either form.
-#
-# The case against shipping any width, recorded because it was argued and overruled rather than
-# missed: 71 is not a default, it is a *measurement of this typeface* -- ttfautohint derives it from
-# the stems of the standard characters as drawn. Overriding it to 74 tells the hinter the stems are
-# thicker than they are, and the +0.9% ink says the rest: at 13-17ppem the font renders slightly
-# heavier than JetBrains Mono Light actually is. On a family whose entire premise is being one step
-# light (JB Light as Regular), that partly argues with itself, and the honest lever for weight is
-# the source weight rather than the hint. 74 was chosen anyway, deliberately, as the smallest step
-# that reads: +0.9% ink is close to nothing, and the alternative was shipping a font its owner finds
-# a shade soft. 78-80 were rejected on exactly this ground -- there the weight gain is visible.
-#
-# It also costs a guarantee. Control instructions add `cvt ` entries, so `cvt ` is no longer
-# byte-identical to the source and has moved out of validate.py's PRESERVED set into the re-hinted
-# one. That is a deliberate, recorded widening of the build's scope, not a silenced check.
-#
-# Rejected after measuring -- recorded so none of it gets retried on a hunch:
-#   x_height_snapping_exceptions="-"   -5.5% crisp and -3.7% ink, the largest move still available
-#                            while staying hinted; built as a side-by-side family and read in situ.
-#                            No real improvement, and it costs a pixel of x-height at 13/15/17ppem.
-#   increase_x_height        a threshold, not a dial: 0/10/12 all measure -6.0%, 18/24/32 all
-#                            measure identical to the default 14. Nothing usable in between.
-#   hinting_range_min=14     a no-op; below range-min ttfautohint reuses the smallest hint set.
-#   hinting_limit=N          not a dial but a cliff -- hinting stops entirely above N ppem.
-#   hint_composites          identical metrics even on composite glyphs (accented letters, and the
-#                            27 composite ligature glyphs), and +53KB a face. Composites inherit
-#                            their components' hinting, which is already correct.
-#   adjust_subglyphs         accent separation fell 0.865 -> 0.816, and +95KB a face.
-#   windows_compatibility    identical metrics, and it would rewrite the usWin metrics the family
-#                            deliberately keeps as shipped.
-#   hinting_range_max=72     identical even measured at 52-72ppem, where alone it could matter.
-#   --reference              the faces already agree on x-height, cap-height and baseline at every
-#                            ppem from 9 to 24, so sharing blue zones would change nothing.
-#   fallback_scaling         actively harmful: accent separation collapsed 0.86 -> 0.16.
-HINT_OPTIONS = dict(
-    fallback_script="latn",
-    control_buffer="* dflt width 74\n",
-    TTFA_info=True,
-)
+# The cut. Source coordinates are Cascadia's named instances; output coordinates are the RIBBI
+# weight classes they get relabelled to. Nothing between these two numbers is interpolated by us
+# -- the span is upstream's own design space, just addressed under different user-space labels.
+SRC_REGULAR, SRC_BOLD = 300, 350   # Cascadia Light, Cascadia SemiLight
+OUT_REGULAR, OUT_BOLD = 400, 700   # our Regular, our Bold
 
-# Names that describe JetBrains Mono and must not survive the rename. 1-6 are rewritten; 7 is the
-# JetBrains trademark line; 16/17 are the typographic family/subfamily, which the Light faces carry
-# and which become redundant once 1/2 are RIBBI-correct; 18/20/21/22/25 are legacy/variable-font
-# name slots that must not describe the old family if present.
+# Names that describe Cascadia and must not survive the rename. 1-6 are rewritten; 7 is the
+# Microsoft trademark line; 16/17 are the typographic family/subfamily, redundant once 1/2 are
+# RIBBI-correct; 18/20/21/22 are legacy name slots that must not describe the old family; 25 is
+# the variations PostScript prefix and is rewritten. Everything 256+ that the layout tables do
+# not point at goes too -- upstream's are all `fvar`/`STAT` labels, which are rebuilt below.
 DROP_IDS = {1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 20, 21, 22, 25}
 
-# IDs 256+ hold the stylistic-set UI labels that GSUB points at. Dropping the whole range would
-# orphan them and the feature UI would go nameless, so collect what the layout tables reference and
-# keep exactly those.
+# Where a feature can hide a UI label in the 256+ range. Cascadia's `ssXX` sets currently carry
+# none, but a source update could add them, and blanket-dropping 256+ would leave the feature UI
+# nameless. Collect whatever the layout tables reference and keep exactly those.
 FEATURE_NAME_ATTRS = (
     "UINameID",
     "FeatUILabelNameID",
@@ -210,8 +134,32 @@ FEATURE_NAME_ATTRS = (
     "FirstParamUILabelNameID",
 )
 
+REGULAR_WGHT = dict(value=OUT_REGULAR, name="Regular", flags=ELIDABLE, linkedValue=OUT_BOLD)
+BOLD_WGHT = dict(value=OUT_BOLD, name="Bold")
+ROMAN_ITAL = dict(value=0, name="Roman", flags=ELIDABLE, linkedValue=1)
+ITALIC_ITAL = dict(value=1, name="Italic")
+
+# One entry per output file. `instances` is (subfamily label, PostScript suffix, output wght);
+# the first is the default instance and reuses nameIDs 2 and 6 rather than minting new records,
+# which is what the OpenType spec asks for and what readers expect to find there.
+CUTS = [
+    dict(suffix="Roman", subfamily="Regular", ps_suffix="Regular", italic=False,
+         prefix="Roman", stat_ital=ROMAN_ITAL,
+         instances=[("Regular", "Regular", OUT_REGULAR), ("Bold", "Bold", OUT_BOLD)]),
+    dict(suffix="Italic", subfamily="Italic", ps_suffix="Italic", italic=True,
+         prefix="Italic", stat_ital=ITALIC_ITAL,
+         instances=[("Italic", "Italic", OUT_REGULAR), ("Bold Italic", "BoldItalic", OUT_BOLD)]),
+]
+
+# family -> (roman source, italic source)
+FAMILIES = [
+    ("rnetonetcode", "CascadiaCode.ttf", "CascadiaCodeItalic.ttf"),
+    ("rnetonetmono", "CascadiaMono.ttf", "CascadiaMonoItalic.ttf"),
+]
+
 
 def referenced_name_ids(font):
+    """nameIDs in the 256+ range that GSUB/GPOS feature parameters point at."""
     ids = set()
     for tag in ("GSUB", "GPOS"):
         if tag not in font:
@@ -231,105 +179,146 @@ def referenced_name_ids(font):
 
 
 def vendor_id(os2):
-    """`achVendID` as text. JetBrains pads theirs to four bytes with NULs ('JB\\0\\0'), and
-    str.strip() does not remove those -- left alone they end up embedded in nameID 3."""
+    """`achVendID` as text. Vendor IDs are NUL-padded to four bytes and str.strip() does not
+    remove NULs -- left alone they end up embedded in nameID 3."""
     return os2.achVendID.replace("\x00", "").strip()
 
 
-REGULAR_WGHT = dict(value=400, name="Regular", flags=ELIDABLE, linkedValue=700)
-BOLD_WGHT = dict(value=700, name="Bold")
-ROMAN_ITAL = dict(value=0, name="Roman", flags=ELIDABLE, linkedValue=1)
-ITALIC_ITAL = dict(value=1, name="Italic")
+def label(name, string):
+    """The nameID of a 256+ record holding exactly `string`, adding one if there is none.
 
-BUILDS = [
-    # The filename suffix and the PostScript suffix are deliberately not the same for the roman
-    # italic: the file is named for its role in the family (RegularItalic), while the PostScript
-    # name follows the RIBBI convention (Italic).
-    # source, subfamily, file suffix, ps suffix, weightclass, bold, italic, stat wght, stat ital
-    ("JetBrainsMono-Light.ttf", "Regular", "Regular", "Regular",
-     400, False, False, REGULAR_WGHT, ROMAN_ITAL),
-    ("JetBrainsMono-Regular.ttf", "Bold", "Bold", "Bold",
-     700, True, False, BOLD_WGHT, ROMAN_ITAL),
-    ("JetBrainsMono-LightItalic.ttf", "Italic", "RegularItalic", "Italic",
-     400, False, True, REGULAR_WGHT, ITALIC_ITAL),
-    ("JetBrainsMono-Italic.ttf", "Bold Italic", "BoldItalic", "BoldItalic",
-     700, True, True, BOLD_WGHT, ITALIC_ITAL),
-]
+    `fvar` and `STAT` both need names for the axis and for each named position, and left to
+    themselves they mint a fresh record every time -- so a file ends up with "Weight" twice and
+    "Bold" twice. Interning them keeps one record per string."""
+    for record in name.names:
+        if record.nameID >= 256 and record.platformID == WINDOWS[0] and str(record) == string:
+            return record.nameID
+    return name.addName(string, platforms=(WINDOWS,))
 
+
+def build(family, source, cut):
+    src_path = os.path.join(SRC_DIR, source)
+    # recalcTimestamp=False makes the build byte-reproducible. fontTools stamps `head.modified`
+    # with the wall clock on save, which is the only thing that differed between two runs of this
+    # script -- verified by diffing every table across two builds. Inheriting the source's
+    # timestamp instead means the committed binaries can be re-derived and compared byte for byte
+    # against the sources plus this file, which is the whole point of a rebranding pipeline.
+    font = TTFont(src_path, recalcTimestamp=False)
+
+    # Probe the layout tables before instancing, on the untouched source: whatever feature UI
+    # labels exist upstream are what must survive the 256+ purge.
+    keep = referenced_name_ids(font)
+
+    # 1. Cut the axis down to Light..SemiLight and move the default onto Light.
+    #
+    # optimize=False turns off IUP delta re-optimization. That is not a performance choice: IUP
+    # optimization drops deltas that interpolation can reproduce to within half a unit, and that
+    # tolerance stacks on top of the rounding the default rebase already costs. Measured over
+    # every point of every glyph, against the source pinned at the matching position:
+    #     optimize=True   max 2 units off at the Bold end   595KB
+    #     optimize=False  max 1 unit off anywhere           633KB
+    # One unit (1/2048 em) is the floor, not a tunable: upstream did not draw Light on integer
+    # coordinates -- it is an interpolation of Cascadia's masters -- so rebasing the default onto
+    # it must round, and the Bold deltas then round against that rounded default. Paying 6% file
+    # size to keep the whole axis at the floor is worth it for a pipeline whose promise is that
+    # nothing was redrawn; a lossy re-encode is exactly the kind of thing it must not do.
+    instancer.instantiateVariableFont(
+        font, {"wght": (SRC_REGULAR, SRC_REGULAR, SRC_BOLD)}, inplace=True,
+        optimize=False, updateFontNames=False,
+    )
+
+    name, os2, head, fvar = font["name"], font["OS/2"], font["head"], font["fvar"]
+
+    # Read the source's version and vendor before the purge removes the records they live in.
+    version = name.getDebugName(5) or "Version 1.000"
+    id3 = name.getDebugName(3) or ""
+    ver_num = (id3.split(";")[0] if id3.split(";")[0]
+               else version.replace("Version ", "").split(";")[0].strip())
+    ps_name = f"{family}-{cut['ps_suffix']}"
+    vend = vendor_id(os2)
+
+    drop = DROP_IDS | {i for i in range(256, 32768) if i not in keep}
+    name.names = [r for r in name.names if r.nameID not in drop]
+    for name_id, value in (
+        (1, family),
+        (2, cut["subfamily"]),
+        (3, f"{ver_num};{vend};{ps_name}"),
+        (4, f"{family} {cut['subfamily']}"),
+        (5, version),
+        (6, ps_name),
+        # nameID 25 prefixes the PostScript name of any instance that has none of its own, so it
+        # must be alphanumeric and must not collide with nameID 6 for a different style.
+        (25, f"{family}{cut['prefix']}"),
+    ):
+        name.setName(value, name_id, *WINDOWS)
+
+    # 2. Relabel the axis into RIBBI user space. Normalised space is untouched, so no outline
+    #    moves -- see the module docstring.
+    axis = next(a for a in fvar.axes if a.axisTag == "wght")
+    assert (axis.minValue, axis.defaultValue, axis.maxValue) == (SRC_REGULAR, SRC_REGULAR, SRC_BOLD)
+    axis.minValue, axis.defaultValue, axis.maxValue = OUT_REGULAR, OUT_REGULAR, OUT_BOLD
+    axis.axisNameID = label(name, "Weight")
+
+    fvar.instances = []
+    for index, (style, ps_suffix, wght) in enumerate(cut["instances"]):
+        instance = NamedInstance()
+        instance.coordinates = {"wght": wght}
+        if index == 0:                       # the default instance: reuse nameIDs 2 and 6
+            instance.subfamilyNameID = 2
+            instance.postscriptNameID = 6
+        else:
+            instance.subfamilyNameID = label(name, style)
+            instance.postscriptNameID = label(name, f"{family}-{ps_suffix}")
+        fvar.instances.append(instance)
+
+    # 3. Style bits. The default instance is the Regular (or the Regular Italic), so no file is
+    #    "bold" at its default -- Bold lives on the axis, not in these flags.
+    os2.usWeightClass = OUT_REGULAR
+    os2.fsSelection = (os2.fsSelection & ~(ITALIC | BOLD | REGULAR)) | USE_TYPO | WWS
+    os2.fsSelection |= ITALIC if cut["italic"] else REGULAR
+    head.macStyle = (head.macStyle & ~0b11) | (0b10 if cut["italic"] else 0)
+
+    # buildStatTable accepts a nameID wherever it accepts a name string, so every label here
+    # is interned first and STAT ends up pointing at the same records `fvar` does.
+    def interned(value):
+        return dict(value, name=label(name, value["name"]))
+
+    buildStatTable(
+        font,
+        [
+            dict(tag="wght", name=axis.axisNameID, ordering=0,
+                 values=[interned(REGULAR_WGHT), interned(BOLD_WGHT)]),
+            dict(tag="ital", name=label(name, "Italic"), ordering=1,
+                 values=[interned(cut["stat_ital"])]),
+        ],
+        elidedFallbackName=label(name, "Regular"),
+    )
+
+    # buildStatTable adds Mac-platform records for its own names and the sources ship Mac copies
+    # of everything; strip both so the name table stays Windows-only.
+    name.names = [r for r in name.names if r.platformID != 1]
+
+    if "DSIG" in font:                       # invalidated by any edit; instancer drops it already
+        del font["DSIG"]
+
+    out = f"{family}-{cut['suffix']}.ttf"
+    font.save(os.path.join(OUT_DIR, out))
+    print(
+        f"{source:<26} -> {out:<26} "
+        f"wght={axis.minValue:.0f}-{axis.defaultValue:.0f}-{axis.maxValue:.0f} "
+        f"w={os2.usWeightClass} "
+        f"inst={[name.getDebugName(i.subfamilyNameID) for i in fvar.instances]} "
+        f"typo={'Y' if os2.fsSelection & USE_TYPO else 'n'} "
+        f"win={os2.usWinAscent}/{os2.usWinDescent} upem={head.unitsPerEm} "
+        f"names={len(name.names)} ui_labels={sorted(keep)}"
+    )
 
 
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
-
-    for (src, subfamily, file_suffix, ps_suffix, weight_class, bold, italic,
-         stat_w, stat_i) in BUILDS:
-        src_path = os.path.join(SRC_DIR, src)
-
-        # Re-hint first, then rebrand the result -- so the name table we write is the final word
-        # and ttfautohint cannot stamp over it.
-        with open(src_path, "rb") as handle:
-            hinted = ttfautohint(in_buffer=handle.read(), **HINT_OPTIONS)
-
-        # Probe the layout tables on a throwaway handle. Reading GSUB through the font we save
-        # would decompile it, and fontTools would then recompile it on save -- semantically
-        # identical but repacked, so the bytes would drift. Untouched tables stay untouched.
-        keep = referenced_name_ids(TTFont(src_path, lazy=True))
-
-        out = f"{FAMILY}-{file_suffix}.ttf"
-        font = TTFont(io.BytesIO(hinted))
-        name, os2, head = font["name"], font["OS/2"], font["head"]
-
-        # Read source version/unique-id parts before the drop step removes them.
-        version = name.getDebugName(5) or "Version 1.000"
-        id3 = name.getDebugName(3) or ""
-        ver_num = (id3.split(";")[0] if id3.split(";")[0]
-                   else version.replace("Version ", "").split(";")[0].strip())
-        ps_name = f"{FAMILY}-{ps_suffix}"
-        vend = vendor_id(os2)
-
-        drop = DROP_IDS | {i for i in range(256, 32768) if i not in keep}
-        name.names = [r for r in name.names if r.nameID not in drop]
-        for name_id, value in (
-            (1, FAMILY),
-            (2, subfamily),
-            (3, f"{ver_num};{vend};{ps_name}"),
-            (4, f"{FAMILY} {subfamily}"),
-            (5, version),
-            (6, ps_name),
-        ):
-            name.setName(value, name_id, *WINDOWS)
-
-        os2.usWeightClass = weight_class
-        os2.fsSelection = (os2.fsSelection & ~(ITALIC | BOLD | REGULAR)) | USE_TYPO | WWS
-        os2.fsSelection |= (BOLD if bold else 0) | (ITALIC if italic else 0)
-        if not bold and not italic:
-            os2.fsSelection |= REGULAR
-
-        head.macStyle = (head.macStyle & ~0b11) | (0b1 if bold else 0) | (0b10 if italic else 0)
-
-        buildStatTable(
-            font,
-            [
-                dict(tag="wght", name="Weight", ordering=0, values=[stat_w]),
-                dict(tag="ital", name="Italic", ordering=1, values=[stat_i]),
-            ],
-            elidedFallbackName="Regular",
-        )
-
-        # buildStatTable adds Mac-platform records for its own names, and the sources ship Mac
-        # copies of the stylistic-set labels; strip both so the name table stays Windows-only.
-        name.names = [r for r in name.names if r.platformID != 1]
-
-        if "DSIG" in font:
-            del font["DSIG"]
-
-        font.save(os.path.join(OUT_DIR, out))
-        print(
-            f"{src:<30} -> {out:<28} w={weight_class} "
-            f"typo={'Y' if os2.fsSelection & USE_TYPO else 'n'} "
-            f"win={os2.usWinAscent}/{os2.usWinDescent} upem={head.unitsPerEm} "
-            f"names={len(name.names)} ss_labels={sorted(keep)} TTFA={'TTFA' in font}"
-        )
+    for family, roman_src, italic_src in FAMILIES:
+        for source, cut in zip((roman_src, italic_src), CUTS):
+            build(family, source, cut)
 
 
 if __name__ == "__main__":

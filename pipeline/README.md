@@ -1,260 +1,243 @@
 # rnetonet build pipeline
 
-Two scripts that reproduce and verify the `rnetonet` font family from its upstream sources.
-The family is a rebrand of **JetBrains Mono**, shifted one step lighter: JetBrains Mono's Light
-ships as `rnetonet`'s Regular, and its Regular ships as `rnetonet`'s Bold.
+Two scripts that reproduce and verify the `rnetonetcode` and `rnetonetmono` variable font
+families from their upstream sources. Both are rebrands of **Cascadia**, shifted one step lighter:
+Cascadia's Light ships as Regular and its SemiLight ships as Bold.
 
-The sources are already static, so nothing is instanced or interpolated and **no outline is ever
-redrawn**. The build does two things: re-hints at stock ttfautohint settings, plus a latin fallback
-script (so the symbol glyphs get hinted too) and one control instruction that nudges the standard
-stem width three units up, and rebrands the metadata. `validate.py` proves the scope by comparing every glyph point coordinate against the
-source and diffing every table the build has no business touching.
+Nothing is redrawn and nothing is re-hinted. The build cuts Cascadia's weight axis down to the
+Light..SemiLight span, relabels that span as 400..700 so the OS reads a Regular and a Bold, and
+rebrands the metadata. `validate.py` proves the scope by instancing source and output at matching
+positions and comparing every glyph coordinate, by re-shaping a text corpus through both with
+HarfBuzz, and by diffing every table the build has no business touching.
 
 ```
 rnetonet/
-  sources/                            <- upstream JetBrains Mono 2.304 (build inputs)
-    JetBrainsMono-Light.ttf                 (300, roman)
-    JetBrainsMono-LightItalic.ttf           (300, italic)
-    JetBrainsMono-Regular.ttf               (400, roman)
-    JetBrainsMono-Italic.ttf                (400, italic)
-  rnetonet-Regular.ttf                <- build outputs (committed)
-  rnetonet-Bold.ttf
-  rnetonet-RegularItalic.ttf
-  rnetonet-BoldItalic.ttf
+  sources/                            <- upstream Cascadia 2407.024 (build inputs)
+    CascadiaCode.ttf                        wght 200-400-700, roman, with ligatures
+    CascadiaCodeItalic.ttf                  wght 200-400-700, italic, with ligatures
+    CascadiaMono.ttf                        the same, ligatures removed
+    CascadiaMonoItalic.ttf
+  rnetonetcode-Roman.ttf              <- build outputs (committed)
+  rnetonetcode-Italic.ttf
+  rnetonetmono-Roman.ttf
+  rnetonetmono-Italic.ttf
 pipeline/
   build.py
   validate.py
 ```
 
+`rnetonetcode` keeps Cascadia Code's programming ligatures; `rnetonetmono` is the ligature-free
+cut. Upstream ships them as separate files whose `glyf` and `cmap` are byte-identical — the only
+difference is `calt`, which carries 116 lookups in Code and 1 in Mono.
+
+Filenames deliberately avoid the `Family[wght].ttf` convention: a literal `[wght]` is a glob
+bracket expression and quietly breaks shell and Python globbing. `-Roman`/`-Italic` mirrors
+upstream's own `CascadiaCodeRoman` variations prefix and globs cleanly.
+
 ## Run
 
 ```sh
-python pipeline/build.py       # re-hint + rebrand -> rnetonet/rnetonet-*.ttf
-python pipeline/validate.py    # OTS + build-scope + structural/RIBBI + fontbakery gate
+python pipeline/build.py       # cut + relabel + rebrand -> rnetonet/rnetonet{code,mono}-*.ttf
+python pipeline/validate.py    # OTS + build-scope + shaping + structural + fontbakery gate
 ```
 
 Both scripts resolve the repo root from their own location, so they run from any working
 directory. They only write `rnetonet/`; sources are read, never modified.
 
+The build is **byte-reproducible**: two runs produce identical files. `head.modified` was the only
+thing that differed before `build.py` started passing `recalcTimestamp=False`, so the committed
+binaries can be re-derived and compared byte for byte against the sources plus the script.
+
 ## What `build.py` does
 
-| Source | usWeightClass in | Output | usWeightClass out |
+Each output is one source file, cut and relabelled:
+
+| Source | wght in | Output | wght out |
 |---|---|---|---|
-| `JetBrainsMono-Light.ttf`       | 300 | `rnetonet-Regular.ttf`       | 400 |
-| `JetBrainsMono-Regular.ttf`     | 400 | `rnetonet-Bold.ttf`          | 700 |
-| `JetBrainsMono-LightItalic.ttf` | 300 | `rnetonet-RegularItalic.ttf` | 400 |
-| `JetBrainsMono-Italic.ttf`      | 400 | `rnetonet-BoldItalic.ttf`    | 700 |
+| `CascadiaCode.ttf`        | 200‑400‑700 | `rnetonetcode-Roman.ttf`  | 400‑400‑700 |
+| `CascadiaCodeItalic.ttf`  | 200‑400‑700 | `rnetonetcode-Italic.ttf` | 400‑400‑700 |
+| `CascadiaMono.ttf`        | 200‑400‑700 | `rnetonetmono-Roman.ttf`  | 400‑400‑700 |
+| `CascadiaMonoItalic.ttf`  | 200‑400‑700 | `rnetonetmono-Italic.ttf` | 400‑400‑700 |
 
-What changes:
+Two named instances per file, and no more:
 
-| Table | Change |
+| Output instance | wght | is upstream's |
+|---|---|---|
+| Regular / Italic       | 400 | Light 300 |
+| Bold / Bold Italic     | 700 | SemiLight 350 |
+
+### 1. The cut
+
+`instancer.instantiateVariableFont(font, {"wght": (300, 300, 350)})` keeps the font variable,
+restricts the axis to the 300–350 span, and moves the default onto 300. `glyf` then holds the
+Light outlines, `cvt ` holds the Light control values rebased through `cvar`, and
+`gvar`/`HVAR`/`GDEF` carry only the deltas that reach from Light to SemiLight.
+
+`optimize=False` turns off IUP delta re-optimization. That is a correctness choice, not a speed
+one: IUP optimization drops deltas that interpolation can reproduce to within half a unit, and
+that tolerance stacks on the rounding the default rebase already costs. Measured over every point
+of every glyph, against the source pinned at the matching position:
+
+| | worst deviation | roman face size |
+|---|---|---|
+| `optimize=True`  | 2 units at the Bold end | 595 KB |
+| `optimize=False` | 1 unit anywhere         | 633 KB |
+
+One unit (1/2048 em) is a floor, not a tunable. Upstream did not draw Light on integer
+coordinates — it is an interpolation of Cascadia's masters — so rebasing the default onto it must
+round, and the Bold deltas then round against that rounded default. 6% file size to keep the whole
+axis at that floor is worth paying in a pipeline whose promise is that nothing was redrawn.
+
+### 2. The relabel
+
+`fvar`'s user-space endpoints are rewritten from 300/300/350 to 400/400/700. This is pure
+relabelling and cannot move an outline: variation deltas live in *normalised* space (−1..1) and
+`avar` maps normalised to normalised, so the only thing an `fvar` min/default/max triple decides
+is how a user-space number is projected onto that normalised range. Both triples project
+300 → 0.0 and 350 → 1.0, so `wght=400` renders exactly what `wght=300` did, `wght=700` exactly
+what 350 did, and `wght=550` the midpoint either way.
+
+The span is affine because upstream's `avar` happens to have breakpoints exactly at the two
+weights being cut — normalised −0.5 → −0.66669 (Light) and −0.25 → −0.33331 (SemiLight) — so the
+segment between them is a straight line. `validate.py` re-derives that span from the source and
+checks the middle of the axis, not just the two ends, so a source whose `avar` moved would fail
+rather than quietly bend.
+
+**Why relabel at all.** The family has to *say* Regular and Bold. Left at 300–350, the OS reads a
+Light family: `usWeightClass` 300, `font-weight: 400` resolving to the lighter end, and every
+RIBBI convention in the OpenType stack arguing with the file. Relabelled, `font-weight: 400` is
+the Regular, `700` is the Bold, and everything between stays continuously variable.
+
+### 3. The contrast this buys
+
+Bold carries **1.2535×** the ink of Regular — outline area over the 62 ASCII alphanumerics, source
+instanced at 350 against 300. For reference, across upstream's full axis:
+
+| upstream instance | ink vs Light |
 |---|---|
-| `fpgm` `prep` `glyf` `loca` `maxp` | re-hinted -- instruction streams only, coordinates untouched |
-| `cvt ` | re-hinted -- gains entries from the `width 74` control instruction |
-| `TTFA` | **added** by ttfautohint -- records every parameter used, so the hinting is auditable |
-| `name`  | rebranded (see below), plus ttfautohint's version stamp in nameID 5 |
-| `OS/2`  | `usWeightClass`, `fsSelection` style bits (+ `USE_TYPO_METRICS`, `WWS`) |
-| `head`  | `macStyle` style bits |
-| `STAT`  | **added** -- the sources ship none, and a RIBBI family should declare its axis positions |
+| ExtraLight 200 | 0.74× |
+| **Light 300** (our Regular) | 1.00× |
+| **SemiLight 350** (our Bold) | **1.25×** |
+| Regular 400 | 1.50× |
+| SemiBold 600 | 1.74× |
+| Bold 700 | 1.89× |
 
-Everything else passes through byte for byte: layout (`GSUB`/`GPOS`/`GDEF`), `cmap`, `hmtx`,
-`hhea`, `post` and `gasp`. To keep that literally true the script probes the layout tables
-on a throwaway font handle -- reading `GSUB` through the font it saves would decompile it, and
-fontTools would then repack it into different (though equivalent) bytes.
+That is a light bold on purpose, and it is *more* contrast than the JetBrains-based `rnetonet`
+this replaces shipped at 1.1203 — so the preference that family was tuned around survives the
+move to Cascadia.
 
-Vertical metrics (typo 1020/-300/0, win 1020/300, upem 1000) are identical across all four faces
-and are kept exactly as shipped, so line height is stable across the family.
+### 4. The rebrand
 
-## Hinting
+Family, subfamily, unique ID, full name, PostScript name and the variations PostScript prefix
+(nameID 25) are rewritten; `fvar` gets its two named instances, the default one reusing nameIDs 2
+and 6 rather than minting new records; `STAT` is rebuilt with a two-value `wght` axis (Regular
+elided and linked to Bold) and an `ital` axis; `OS/2` and `head` get the weight class and style
+bits that go with a Regular default — no file is "bold" at its default, because Bold lives on the
+axis.
 
-Upstream JetBrains Mono 2.304 is hinted with **stock ttfautohint defaults**. That is verified
-rather than assumed: re-running ttfautohint with no options at all reproduces its `fpgm`, `prep`,
-`cvt ` and `glyf` byte for byte -- and it still does with the newer ttfautohint used here
-(1.8.4.16-eb64, against the 1.8.4.7-5d5b stamped into the sources). Two things depart from that:
-one default that is wrong for a coding font, and one control instruction that is a stated
-preference rather than a fix.
+Name records for `fvar` and `STAT` are interned, so a file carries one "Weight" and one "Bold"
+record rather than the duplicates each builder would otherwise mint.
 
-| Parameter | Default | Ours | Why |
-|---|---|---|---|
-| `fallback-script` | `none` | `latn` | `none` means every glyph outside a recognised script gets **no hinting at all** -- here that is 128 box-drawing glyphs, 32 block elements, 21 arrows, 62 math symbols and 43 geometric shapes: exactly what a terminal draws TUI borders, tables, tree views and progress bars with. Affects symbols only. |
-| `control-instructions` | none | `* dflt width 74` | Standard stem width, three units above the 71 ttfautohint measures from the outlines. +2.1% crispness, +0.9% ink. A preference, not a fix -- see below. |
-| `TTFA-info` | off | on | Writes the `TTFA` table so a built font states how it was hinted. Not a hinting parameter -- it is what `validate.py` reads to prove the config has not drifted. |
-| *stem width modes* | quantized / strong / quantized | *unchanged* | Moved to `strong` in `34aed65` and to `natural` in `ed31a38`; both reverted. See below. |
+## What is preserved, and what necessarily moves
 
-So the shipped hinting is `ttfautohint --fallback-script=latn` plus a one-line control file
-containing `* dflt width 74`. Re-hinting is therefore a no-op on everything ttfautohint recognises a script
-for -- worth knowing before reaching for a version bump: a newer ttfautohint does not change this
-font.
+Untouched, and checked table by table:
 
-Scope, checked glyph by glyph rather than asserted: **1215 of 1743 glyphs keep upstream's
-instruction stream byte for byte.** The 528 that change are box drawing (128), technical (105),
-math (105), other symbols (48), arrows (34), block elements (32), geometric shapes (28), plus the
-letterlike math alphanumerics (double-struck CHNPQRZ, script l), 12 math brackets, ceilings and
-floors, one Gujarati digit and 8 unencoded glyphs. **No Latin letter, digit or ASCII punctuation
-mark moves** -- which is the precise version of the claim this README used to make more loosely.
+`glyf` outlines and instruction streams · `fpgm` · `prep` · `gasp` · `cmap` · `post` ·
+`GSUB` lookups · `GPOS` · vertical metrics (typo 1900/−480/0, win 2226/480, upem 2048 — identical
+across all four files, so line height is stable across both families) · the monospace advance
+(1200) · PANOSE.
 
-### The stem-width modes: both ends tried, both reverted
+PANOSE weight stays at 6 (Medium) deliberately: it describes the weight the font *declares*, which
+after the relabel is 400, not the master it was cut from.
 
-The mode is a three-position switch, and this family has now sat in all three positions:
+Three things change as a consequence of restricting the axis, each of them correct:
 
-| mode | effect | symbols | letters + digits | Bold/Regular ink ratio |
-|---|---|---|---|---|
-| `natural` | no rounding at all, softest -- `ed31a38`, reverted | 0.2978 | 0.0786 | 1.1236 |
-| `quantized` | **shipped**; ttfautohint's default, identical to upstream | 0.3041 | 0.0800 | 1.1203 |
-| `strong` | stems snapped onto whole pixels -- `34aed65`, reverted | 0.3819 | 0.1059 | 1.0938 |
-
-`strong` measured far crisper and **read brittle**. `natural` measured -1.7% on letters and was
-**not noticeable in daily use** -- which is the actual finding, and the reason the switch is now
-considered spent: one step is too hard, the other is indistinguishable. Nothing useful lives in its
-soft half.
-
-Measured as the fraction of ink rendered at full saturation rather than smeared into half-grays,
-over 9-18 ppem on the Light face; the ink ratio is the same measurement over both roman faces.
-FreeType's default **v40 interpreter emulates ClearType**, so it takes the *DirectWrite* branch,
-not the grayscale one -- which is why `dw-` is the mode that moves these numbers.
-
-### The fine dial: control-instruction stem width, and why 74 ships
-
-The mode is coarse, but the standard stem width underneath it is just a number, and control
-instructions can set it directly. This is the dial the family ended up on, after both stem width
-*modes* were tried and reverted:
-
-```
-control_buffer="* dflt width N\n"         # N in font units
-```
-
-`latn dflt width N` is not a way to spare the symbols, which is the obvious guess and wrong:
-`fallback-script` is `latn`, so the symbol glyphs are hinted *as* latin and take the same
-width. Measured identical to `* dflt` on letters and symbols alike -- at width 76, 15
-box-drawing glyphs change under either form.
-
-ttfautohint auto-detects **71** for JetBrains Mono Light. That is verified, not guessed: `width 71`
-renders identically to leaving it auto -- same `glyf` bytes, same measurements to four decimals.
-Measured on letters and digits, 9-18 ppem, against that baseline:
-
-| width | crispness | ink | reads as |
-|---|---|---|---|
-| 66-69 | -12% | -1.5% | a cliff, not a nudge |
-| 70 | -3.9% | -0.3% | a little softer |
-| 71 | baseline | baseline | auto -- what ttfautohint measures from the outlines |
-| **74** | **+2.1%** | **+0.9%** | **shipped** -- the smallest perceptible step up |
-| 75-77 | +1.9 to +2.7% | +1.3 to +1.9% | a little crisper |
-| 78-80 | +3.7 to +4.0% | +2.5% | noticeably crisper |
-| 90+ | +14% and up | +5% and up | back in `strong` territory |
-
-Two caveats. It is steppy rather than smooth -- quantized mode snaps to a set of widths, so 72 and
-73 measure slightly *below* 71 rather than above -- and it moves weight as well as crispness, about
-+0.3% ink per unit, which on a Light-based family is not nothing.
-
-**The case against shipping any width, recorded because it was argued and overruled rather than
-missed.** 71 is not a default; it is a *measurement of this typeface*, derived by ttfautohint from
-the stems of the standard characters as drawn. Overriding it to 74 tells the hinter the stems are
-thicker than they are, and the +0.9% ink says the rest: at 13-17 ppem the font renders slightly
-heavier than JetBrains Mono Light actually is. On a family whose whole premise is being one step
-light (JB Light as Regular), that partly argues with itself, and the honest lever for weight is the
-source weight rather than the hint. 74 was chosen anyway, deliberately: it is the smallest step
-that reads, +0.9% ink is close to nothing, and the alternative was shipping a font its owner finds
-a shade soft. 78-80 were rejected on exactly this ground, since there the weight gain is visible.
-
-**It also costs a guarantee.** Control instructions add `cvt ` entries, so `cvt ` is no longer
-byte-identical to the source. It moved out of `validate.py`'s `PRESERVED` set into the re-hinted
-one -- a deliberate, recorded widening of the build's scope, not a silenced check. The width itself
-is pinned in `EXPECTED_TTFA_CONTROL` and negative-tested: building at width 76 fails the gate on
-that exact assertion.
-
-Rejected after measuring, not by taste -- recorded so none of it gets retried on a hunch:
-
-| Rejected | Why |
+| | why |
 |---|---|
-| `x-height-snapping-exceptions=-` | -5.5% crispness and -3.7% ink, the largest move still available while staying hinted. Built as a side-by-side family (`rnetonetsoft`) and read in place: **no real improvement**, and it costs a pixel of x-height at 13/15/17 ppem. |
-| `increase-x-height` | A threshold, not a dial: 0/10/12 all measure -6.0%, and 18/24/32 all measure identical to the default 14. Nothing usable in between. |
-| `hinting-range-min=14` | A no-op -- below range-min ttfautohint reuses the smallest hint set rather than dropping hinting. |
-| `hinting-limit=N` | Not a dial but a cliff: hinting stops entirely above N ppem, so two adjacent sizes render on different principles. |
-| `dehint` | Gives up the symbol hinting this build exists for. Also not measurable with the crispness proxy -- see the limits below. |
-| `hint-composites` | Identical metrics even on composite glyphs (accented letters, and the 27 composite ligature glyphs), and +53KB a face. Composites inherit their components' hinting, which is already correct. |
-| `adjust-subglyphs` | Accent separation fell 0.865 -> 0.816, and +95KB a face. |
-| `x-height-snapping-exceptions=6-16` | +1% crispness, but accent separation fell to 0.812. (Measured during the `strong` era with a harness that no longer exists; the `-` row above is the current number.) |
-| `windows-compatibility` | Identical metrics, and it would rewrite the `usWin` metrics the family deliberately keeps as shipped. |
-| `hinting-range-max=72` | Identical even when measured at 52-72 ppem, the only range where it could matter. |
-| shared `--reference` | The faces already agree on x-height, cap-height and baseline at every ppem from 9 to 24. |
-| `fallback-scaling` | Actively harmful: accent separation collapsed 0.86 -> 0.16. |
-| per-face stem modes | Regular `strong` + Bold `quantized`, tried while `strong` was still in: recovered only +0.06% of the weight contrast while costing Bold a fifth of its crispness gain. |
-| `gasp` tuning | Built and installed as a separate family (`{20: 0x07, 65535: 0x0F}` -- no ClearType symmetric smoothing at or below 20 ppem) and compared side by side in a real editor on Windows/DirectWrite, since FreeType ignores `gasp` and the harness here is blind to it. **No visible difference**, so the variant was dropped and `gasp` stays exactly as upstream ships it. |
+| `cvt `/`cvar` | `cvt ` is rebased onto the new default through `cvar`. The hinting *program* — `fpgm`, `prep`, and every glyph's bytecode — is byte-identical; only the control values it reads move, which is what a variable font's hinting is supposed to do at a new default. |
+| `hmtx`/`hhea` | Advances stay 1200 everywhere; left side bearings follow the Light outlines, and `hhea`'s derived min/max fields follow the bearings. |
+| `GSUB` `rvrn` | Dropped, with its 2 lookups. `rvrn` is upstream's required-variation feature, and its condition sets cover normalised design 0.0–1.0 — `wght` 400–700 in source terms. The cut sits at −0.667..−0.333, below every condition, so the feature could never fire here. `calt`, `rclt`, `rlig`, the `ssXX` sets and every other feature come through with their lookups intact. |
 
-### Known limits of this tuning
+`DSIG` is dropped: any edit invalidates it.
 
-The parameter search is exhausted, but the *quality* ceiling is not:
+## Licensing
 
-- **Control instructions are untouched.** ttfautohint's `control_file` allows per-glyph, per-ppem
-  manual fixes, which is how a foundry polishes autohinting beyond what flags can reach. That is
-  the biggest remaining lever, and it needs per-glyph visual review rather than a metric.
-- **Only FreeType grayscale was measured.** DirectWrite, CoreText and subpixel/LCD ClearType were
-  not -- they cannot be driven from this pipeline. That gap is why every setting here was decided
-  by reading in a real editor for a day, with the numbers used only to rank what was worth trying:
-  `strong` and `natural` both measured cleanly and both lost on how they actually looked.
-- **The metric is a proxy, and it breaks across the hinted/unhinted line.** "Fraction of
-  fully-saturated ink" tracks crispness within one hinting family. A dehinted build measures
-  *higher* (0.1294) than any hinted one, because at that point it is measuring accidental grid
-  alignment, not sharpness. Do not compare across that line.
-- **The measurement harness is not in the repo.** The numbers above are reproducible in principle
-  -- render at 9-18 ppem through FreeType and count fully-saturated pixels -- but nothing in the
-  pipeline re-runs them, so they age silently.
-- **The 153 ligature glyphs were never rendered.** They are not reachable by codepoint without
-  shaping, so they were checked structurally (126 hinted, 27 composite and inheriting) rather than
-  measured.
-
-The smart-dropout instruction and the integer-PPEM `head.flags` bit both survive re-hinting, so
-there is still no dropout patch to apply.
-
-**Ligatures are kept.** JetBrains Mono's coding ligatures live in `calt`, which passes through
-untouched, so `-> => != ===` render as ligatures -- verified by shaping them through HarfBuzz in
-all four faces. Worth knowing if you were relying on a ligature-free base: JetBrains ships an
-`NL` no-ligature cut, and swapping the four source files for it needs no pipeline change.
-
-The `cvXX` character variants and `ssXX` stylistic sets survive too, including the four UI labels
-`GSUB` points at -- "Classic construction", "Closed construction", "Broken equals ligatures",
-"Rased bar f" -- which are found by walking the layout tables rather than being hardcoded, so the
-256+ name purge cannot orphan them.
-
-**OFL-1.1 compliance:** copyright (nameID 0), full license text (13), license URL (14) and author
-acknowledgements (8/9, plus vendor/designer URLs 11/12) are preserved; the family is renamed and
-the trademark line (nameID 7) is dropped, since the result is not JetBrains Mono. JetBrains Mono
-carries no Reserved Font Name, so clause 3 does not bite -- the rename is about not passing the
-derivative off as the original. No license text is altered (clause 5).
-
-One upstream trap worth naming: `achVendID` is NUL-padded (`'JB\0\0'`), and `str.strip()` does not
-remove NULs -- composing nameID 3 from it naively smuggles NUL bytes into the name table.
-`build.py` strips them and `validate.py` guards the whole table against them.
+Cascadia ships under an SIL OFL 1.1-based licence. Copyright (nameID 0), the full licence (13) and
+licence URL (14) are preserved verbatim, as are the author and vendor acknowledgements — 8 "Saja
+Typeworks", 9 "Aaron Bell", and the URLs in 11/12 — which clause 4 permits exactly. The family is
+renamed, so clause 3 (Reserved Font Name) cannot bite whether or not Microsoft reserved
+"Cascadia". The trademark line (nameID 7) is dropped, since these files are not Cascadia Code. No
+licence text is altered (clause 5).
 
 ## What `validate.py` checks
 
+306 checks across five stages. Non-zero exit if any of them fails, so it works as a CI gate.
+
 1. **OTS** — every output must sanitize.
-2. **Build scope** — `glyf` legitimately changes (instruction streams live in it), so byte-identity
-   is the wrong test there; instead **every glyph point coordinate** is compared against the
-   source, which is what "no outline was redrawn" actually means. Only the hinting tables
-   (`fpgm`/`prep`/`glyf`/`loca`/`maxp`) and the metadata tables (`name`/`OS/2`/`head`) may differ;
-   `STAT` and `TTFA` are the only additions; the layout, `cmap`, metric, `cvt ` and `gasp` tables
-   must still be byte-identical. The `TTFA` table is then read back and asserted to carry the exact
-   ttfautohint parameters the build commits to, so the hinting config cannot drift silently.
-3. **Structural / RIBBI** — shared family name, subfamilies, weight classes, `fsSelection` /
-   `macStyle` style bits, no JetBrains branding left in the identity names (0/8/9/11-14 keep it,
-   as attribution), trademark dropped, no NUL bytes in any name record, integer-PPEM `head.flags`
-   bit, STAT present, no `fvar` (these are statics), smart-dropout present in `prep`, stylistic-set
-   UI labels still resolving, vertical metrics unchanged and consistent across the family, uniform
-   advance widths (monospace), Windows-only name records, no DSIG.
-4. **fontbakery `check-universal`** — no FAIL beyond a small allowlist inherited from upstream
-   JetBrains Mono (`case_mapping`, `empty_letters`, `family/win_ascent_and_descent`). Any new FAIL
-   fails the run. The allowlist is verified by running the same profile over the untouched sources:
-   the rebrand introduces zero new FAILs and zero new WARNs, and fixes two the sources have
-   (`no_mac_entries`, `opentype/STAT/ital_axis`).
+2. **Build scope.** Byte-identity is the wrong test for most tables here — restricting a variable
+   axis legitimately rewrites `glyf`, `gvar`, `cvt `, `cvar`, `hmtx`, `hhea` and the variation
+   stores in `GDEF`/`GPOS` — so the scope is proved three other ways:
+   - **Outline equivalence across the axis.** Source and output are instanced at matching
+     positions (source 300/325/350 against output 400/550/700) and every coordinate is compared:
+     ~62k points per roman face, ~49k per italic. Identical at the default; at most one unit
+     elsewhere.
+   - **Hinting identity.** `fpgm`, `prep` and all 1363 (roman) / 1022 (italic) glyph instruction
+     streams byte-identical, plus `gasp`, `cmap` and `post`.
+   - **Layout parity.** Every GSUB/GPOS feature survives with the same lookup count and types. The
+     one feature allowed to vanish is one that had no lookups at the default and reached the font
+     only through `FeatureVariations` records this cut can never satisfy. That is proved, not
+     assumed: the cut's span is normalised into the source's own design space and every condition
+     set is checked disjoint from it, so a source update that moved those conditions into range
+     would fail the run.
+3. **Shaping** — the check that actually matters for a coding font. A corpus of operators, prose,
+   accented and combining-mark text, RTL and box drawing is shaped through source and output at
+   both ends of the axis with HarfBuzz; the glyph *names* must match exactly and the positions to
+   within the same one-unit floor. Then the family split is asserted behaviourally: `rnetonetcode`
+   must ligate `-> => != === <=> |> :: ?. >= <-` at both weights, and `rnetonetmono` must leave
+   every one of them as plain characters.
+4. **Structural / variable-font** — `fvar` axis 400‑400‑700 with exactly two named instances and
+   the default one on nameIDs 2/6; `STAT` with Regular elided and linked to Bold plus the right
+   `ital` value; RIBBI names, weight class and style bits; no Cascadia or Microsoft branding in the
+   identity names (0/8/9/11–14 keep it, as attribution) and the trademark dropped; no NUL bytes;
+   Windows-only name records; no DSIG; integer-PPEM `head.flags` bit; timestamps inherited from
+   the source (the reproducibility guarantee); uniform advance widths at *both* weights; vertical
+   metrics unchanged and identical across all four files.
+5. **fontbakery `check-universal`**, run once per family — running both together produces nothing
+   but "inconsistent family name" noise, since these are two families. No FAIL beyond a small
+   allowlist inherited from upstream Cascadia: `arabic_high_hamza`, `case_mapping`,
+   `family/win_ascent_and_descent`, `nested_components`, `smart_dropout`. Each family reports
+   PASS=174 FAIL=9.
 
-Exit code is non-zero if any stage fails, so `validate.py` works as a CI gate.
+The allowlist is verified rather than assumed, and the build's two stages were measured
+separately:
 
-The checks are negative-tested: sabotaging a copy (moving one outline point by 1 unit, making the
-TTFA table claim `fallback-script=none`, building at stem width 76 instead of 74, leaving the
-family name as JetBrains Mono, smuggling a NUL into nameID 3, shifting `sTypoAscender`, dropping a
-stylistic-set label) makes the run fail -- each caught by the specific check meant to catch it.
+| stage | new FAILs | fixed |
+|---|---|---|
+| raw source → axis cut only | `fvar/regular_coords_correct`, `varfont/valid_default_instance_nameids` (the axis says 300 while the names still say Regular) | — |
+| axis cut → rebranded output | none | both of the above, plus `no_mac_entries` |
+
+One WARN is expected and is *not* inherited: `points_out_of_bounds` fires on one Arabic contextual
+form, `uni0777.fina`, whose composite bounding box rounds one unit short of a component point once
+the default sits on Light. The source instanced at Light has it too. fontbakery's own advice on
+this check is that fixing it usually does more harm than good.
+
+### The checks are negative-tested
+
+Sabotaging a built copy makes the run fail, each break caught by the specific check meant to catch
+it — 8/8 mutations caught:
+
+| mutation | caught by |
+|---|---|
+| axis max widened 700 → 800 | outline equivalence at the middle of the axis (worst deviation 14) |
+| one point of glyph `A` moved 3 units | outline equivalence at the default |
+| a byte prepended to `prep` | `prep` byte-identical to source |
+| `calt` stripped of its lookups | shaping picks different glyphs; ligature policy |
+| nameID 1 set back to "Cascadia Code" | family name, and the branding scan |
+| Bold instance moved to wght 600 | named instance position |
+| `STAT` Regular linked to 500 | STAT axis values |
+| `sTypoAscender` bumped by 1 | vertical metrics unchanged, and consistent across the family |
 
 ### Requirements
 
-`fonttools`, `ttfautohint-py`, `opentype-sanitizer` (`ots`), `fontbakery`.
+`fonttools`, `uharfbuzz`, `opentype-sanitizer` (`ots`), `fontbakery`. No `ttfautohint` — this
+pipeline does not re-hint.
