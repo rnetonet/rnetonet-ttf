@@ -10,9 +10,10 @@ Four stages, each of which can fail the run (non-zero exit) so this doubles as a
    actually means. Only the hinting tables (`fpgm`/`prep`/`glyf`/`loca`/`maxp`) and the metadata
    tables (`name`/`OS/2`/`head`) may differ; `STAT` and `TTFA` are the only additions. The layout
    tables carrying the ligatures and stylistic sets (`GSUB`/`GPOS`/`GDEF`), plus `cmap`, `hmtx`,
-   `hhea`, `post`, `cvt ` and `gasp`, must still be byte-identical. Finally the `TTFA` table is
-   read back and asserted to carry the exact ttfautohint parameters `build.py` commits to, so the
-   hinting configuration cannot drift silently.
+   `hhea`, `post` and `gasp`, must still be byte-identical. `cvt ` used to be in that list and no
+   longer is: the `* dflt width 74` control instruction adds entries to it. Finally the `TTFA`
+   table is read back and asserted to carry the exact ttfautohint parameters `build.py` commits
+   to -- including that control instruction -- so the hinting configuration cannot drift silently.
 3. Structural RIBBI checks: one shared family name, correct subfamilies / weight classes / style
    bits, no JetBrains branding left in the identity strings, no NUL bytes smuggled into a name
    record, integer-PPEM `head.flags` bit, STAT present, `fvar` absent (these are statics),
@@ -55,21 +56,33 @@ SMART_DROPOUT = bytes([0xB8, 0x01, 0xFF, 0x85, 0xB0, 0x04, 0x8D])
 
 # What each stage of `build.py` is allowed to touch.
 REBRANDED = {"name", "OS/2", "head"}          # metadata rewrite
-REHINTED = {"fpgm", "prep", "glyf", "loca", "maxp"}   # ttfautohint output (instructions only)
+REHINTED = {"fpgm", "prep", "cvt ", "glyf", "loca", "maxp"}   # ttfautohint output
 ADDED = {"STAT", "TTFA"}                      # STAT by the rebrand, TTFA by ttfautohint
 
 # Must survive byte for byte: the layout tables carrying ligatures and stylistic sets, the
-# character map, the metrics, and the control values / gasp that re-hinting happens not to move.
-PRESERVED = ("GDEF", "GPOS", "GSUB", "cmap", "hmtx", "hhea", "post", "cvt ", "gasp")
+# character map, the metrics, and gasp.
+#
+# `cvt ` is deliberately NOT in here. It was, for as long as the build passed no control
+# instructions -- re-hinting at stock parameters reproduces upstream's control values exactly. The
+# `* dflt width 74` instruction adds entries to it, so byte-identity is no longer the right test
+# and the table moved into REHINTED. That is a widening of the build's scope, made on purpose and
+# recorded here; the width itself is pinned below so it cannot drift.
+PRESERVED = ("GDEF", "GPOS", "GSUB", "cmap", "hmtx", "hhea", "post", "gasp")
 
 # The ttfautohint parameters `build.py` commits to, as they appear in the TTFA table. Asserting
 # these is what stops the hinting config from drifting silently.
 EXPECTED_TTFA = {
     "fallback-script": "latn",
-    "gray-stem-width-mode": "natural",
+    "gray-stem-width-mode": "quantized",
     "gdi-cleartype-stem-width-mode": "strong",
-    "dw-cleartype-stem-width-mode": "natural",
+    "dw-cleartype-stem-width-mode": "quantized",
 }
+
+# The control instruction, as it appears in the TTFA table's `control-instructions` block. The
+# parsed dict above cannot carry it -- ttfautohint writes it as a backslash continuation across
+# lines -- so it is matched against the raw table text instead. This is what stops the shipped stem
+# width from drifting silently.
+EXPECTED_TTFA_CONTROL = "* dflt width 74"
 
 # Vertical metric fields that must match the source and each other -- these set line height, so
 # drift between faces would make mixed-weight text jump.
@@ -199,6 +212,10 @@ def stage_scope(report):
         for key, want in EXPECTED_TTFA.items():
             report.check(ttfa.get(key) == want, f"{fn}: TTFA {key} == {want}",
                          f"got {ttfa.get(key)!r}")
+        raw_ttfa = font.getTableData("TTFA").decode("utf-8", "replace") if "TTFA" in font else ""
+        report.check(EXPECTED_TTFA_CONTROL in raw_ttfa,
+                     f"{fn}: TTFA control instruction is '{EXPECTED_TTFA_CONTROL}'",
+                     f"control-instructions block: {raw_ttfa.split('control-instructions')[-1]!r}")
 
 
 def stage_structure(report):

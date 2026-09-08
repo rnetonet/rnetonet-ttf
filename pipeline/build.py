@@ -9,15 +9,15 @@ ships as the family's Regular, and its Regular ships as the family's Bold.
     rnetonet/sources/JetBrainsMono-Italic.ttf       (400) -> rnetonet-BoldItalic.ttf     (-> 700)
 
 The sources are already static, so **nothing is instanced or interpolated and no outline is ever
-redrawn**. Two things happen: the fonts are re-hinted -- close to stock ttfautohint settings, with
-a latin fallback script so the symbol glyphs get hinted too and the softest stem width mode so the
-letters do not read brittle -- and the metadata is rebranded.
+redrawn**. Two things happen: the fonts are re-hinted -- at stock ttfautohint settings but with a
+latin fallback script, so the symbol glyphs get hinted too -- and the metadata is rebranded.
 
 Glyph *outlines* come through untouched -- `validate.py` compares every point coordinate against
 the source -- as do the layout tables that carry the ligatures and stylistic sets
-(`GSUB`/`GPOS`/`GDEF`), plus `cmap`, `hmtx`, `hhea`, `post`, `cvt ` and `gasp`. What changes:
+(`GSUB`/`GPOS`/`GDEF`), plus `cmap`, `hmtx`, `hhea`, `post` and `gasp`. What changes:
 
-    fpgm/prep/glyf  re-hinted (instruction streams only; coordinates are identical)
+    fpgm/prep/cvt   re-hinted; `cvt ` gains entries from the control instruction (see HINT_OPTIONS)
+    glyf            re-hinted -- instruction streams only; coordinates are identical
     TTFA            added by ttfautohint -- records every parameter used, so the hinting is auditable
     name            rebranded, plus the ttfautohint version stamp in nameID 5
     OS/2            usWeightClass, fsSelection style bits
@@ -26,13 +26,15 @@ the source -- as do the layout tables that carry the ligatures and stylistic set
 
 Upstream JetBrains Mono 2.304 is hinted with **stock ttfautohint defaults** -- verified, not
 assumed: re-running ttfautohint with no options reproduces its `fpgm`, `prep`, `cvt ` and `glyf`
-byte for byte. Two of those defaults are changed here. `fallback-script=none` is simply wrong for a
-coding font: it leaves every box-drawing and block glyph unhinted. And the stem width modes are
-moved from QUANTIZED to NATURAL, the softest setting ttfautohint has, because this family is read
-all day and quantized stems came out harder-edged than wanted -- see HINT_OPTIONS below, which
-records what that costs, what the STRONG experiment cost before it, and how small the move actually
-measures. The smart-dropout instruction and the integer-PPEM `head.flags` bit survive re-hinting,
-so there is still no dropout patch to apply.
+byte for byte, even though the ttfautohint here (1.8.4.16-eb64) is a newer build than the one
+upstream used (1.8.4.7-5d5b). One default is wrong for a coding font -- `fallback-script=none`
+leaves every box-drawing and block glyph unhinted -- so that is the single parameter this build
+changes on its own. The second departure is a control instruction, `* dflt width 74`, which nudges
+the standard stem width three units above the 71 ttfautohint measures from the outlines -- a
+preference, not a fix, argued out in HINT_OPTIONS below. Both
+stem width modes have been moved and moved back; HINT_OPTIONS below records why, and documents the
+one dial that is actually fine-grained. The smart-dropout instruction and the integer-PPEM
+`head.flags` bit survive re-hinting, so there is still no dropout patch to apply.
 
 Vertical metrics (typo 1020/-300/0, win 1020/300, upem 1000) are identical across all four faces
 and are kept exactly as shipped, so line height is stable across the family.
@@ -60,7 +62,7 @@ import os
 
 from fontTools.otlLib.builder import buildStatTable
 from fontTools.ttLib import TTFont
-from ttfautohint import StemWidthMode, ttfautohint
+from ttfautohint import ttfautohint
 
 # Repo root, resolved from this file so the pipeline runs from any working directory.
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -72,9 +74,8 @@ WINDOWS = (3, 1, 0x409)
 ITALIC, BOLD, REGULAR, USE_TYPO, WWS = 1 << 0, 1 << 5, 1 << 6, 1 << 7, 1 << 8
 ELIDABLE = 0x2
 
-# ttfautohint parameters. Upstream ships stock defaults; two of them depart here -- the fallback
-# script and the stem width modes -- plus the info table. Everything else stays at its default,
-# deliberately.
+# ttfautohint parameters. Upstream ships stock defaults; the one departure is the fallback script,
+# plus the info table. Everything else stays at its default -- twice on purpose now, see below.
 #
 #   fallback_script="latn"
 #       The default, "none", means any glyph outside a recognised script gets no hinting at all --
@@ -82,68 +83,113 @@ ELIDABLE = 0x2
 #       symbols and 43 geometric shapes. Exactly the glyphs a terminal draws TUI borders, tables,
 #       tree views and progress bars with. Hinting them against latin blue zones snaps their rules
 #       onto the pixel grid instead of smearing them across two rows. It touches *only* those
-#       glyphs: everything with a recognised script is left to the stem width modes below.
+#       glyphs: everything with a real script is hinted identically to upstream. Verified glyph by
+#       glyph rather than assumed -- 1215 of 1743 instruction streams come through byte for byte,
+#       and the 528 that change are box drawing (128), technical (105), math (105), other symbols
+#       (48), arrows (34), blocks (32), geometric (28), plus the letterlike math alphanumerics
+#       (double-struck CHNPQRZ, script l), 12 math brackets/ceilings/floors, one Gujarati digit and
+#       8 unencoded glyphs. No Latin letter, digit or ASCII punctuation mark moves.
 #
-#   gray_stem_width_mode = dw_cleartype_stem_width_mode = NATURAL
-#       The softness dial, turned down one step past upstream. The three modes differ only in how
-#       far a stem width is allowed to be pulled towards the pixel grid:
-#           NATURAL    (ours) no rounding at all -- a stem keeps its fractional width, so its edge
-#                      keeps its partial coverage instead of being pulled onto a step. Softest.
-#           QUANTIZED  (ttfautohint's default, and what upstream JetBrains Mono ships) rounds stem
-#                      widths onto a quantized set.
-#           STRONG     snaps stems onto whole pixels. Set in commit 34aed65 and reverted in
-#                      5bbd30c: it measured much crisper and read brittle in daily use.
+#   *_stem_width_mode
+#       Left at ttfautohint's defaults: QUANTIZED for grayscale and DirectWrite ClearType, STRONG
+#       for GDI ClearType. Both non-GDI ones have now been moved and moved back, in both
+#       directions, and that pair of results is the useful part:
+#           STRONG   (34aed65, reverted in 5bbd30c) +32% fully-saturated ink on letters and digits.
+#                    Measured well; read brittle in daily use.
+#           NATURAL  (ed31a38, reverted here) -1.7%. Too small to notice in daily use, which is the
+#                    finding: the mode switch has nothing useful in its soft half.
+#       So the mode is a coarse switch -- one step too hard, one step indistinguishable -- and both
+#       ends are now spent. Since all three sit at their defaults, none is passed: an unset option
+#       is the honest way to say "stock", and TTFA records the effective values regardless.
 #       ttfautohint emits a `prep` that branches on rendering mode, and it is easy to get backwards
 #       which branch reaches whom:
 #           dw_cleartype  -> FreeType's default v40 interpreter, and DirectWrite. v40 emulates
 #                            ClearType, so this is the one nearly every modern reader gets.
 #           gray          -> only the legacy v35 interpreter (grayscale, full hinting).
-#           gdi_cleartype -> only Windows GDI ClearType. Left at its STRONG default: nothing in
-#                            this pipeline can render that branch, so softening it would be a
-#                            change made blind, and upstream ships it as it is.
+#           gdi_cleartype -> only Windows GDI ClearType.
 #
 #   TTFA_info=True
 #       Writes a TTFA table listing every parameter used, so a built font says how it was hinted.
+#       Upstream ships no such table; this is an audit aid, not a hinting parameter, and it is what
+#       validate.py reads to prove the configuration has not drifted.
+#
+# Re-hinting is a no-op on the hinting tables. Running this ttfautohint (1.8.4.16-eb64, a newer
+# build than the 1.8.4.7-5d5b stamped into the sources) with stock parameters reproduces upstream's
+# fpgm, prep, cvt and glyf byte for byte, on both roman faces. Only fallback_script=latn changes
+# anything at all, and only for the 286 symbol glyphs.
 #
 # Measured on the Light face, as the fraction of ink rendered at full saturation rather than smeared
 # into half-grays, over 9-18 ppem under FreeType's default v40 interpreter (so, the dw branch):
 #                                   symbols   letters+digits   Bold/Regular ink ratio
 #   upstream defaults                0.2962       0.0800               1.1203
-#   + fallback_script=latn           0.3041       0.0800               1.1203
-#   + gray/dw NATURAL (ours)         0.2978       0.0786               1.1236
+#   fallback_script=latn (ours)      0.3041       0.0800               1.1203
+#   + gray/dw NATURAL (reverted)     0.2978       0.0786               1.1236
 #   + gray/dw STRONG (reverted)      0.3819       0.1059               1.0938
+# So this build buys +2.7% on symbols and leaves letters, digits and weight contrast exactly where
+# upstream has them.
 #
-# Read those honestly. NATURAL is a *small* move: -1.7% on letters and digits, -2.1% on symbols,
-# against the +32% that STRONG added. Stem width mode is the only softness flag ttfautohint offers
-# and this is its softest setting, so a font that still reads too crisp is not going to be fixed by
-# another flag -- the remaining levers are `hinting_limit` (stop hinting above a ppem) or dropping
-# hinting altogether, both of which give up the symbol hinting this build exists for.
-# What NATURAL does buy outright is weight separation: the Bold/Regular ink ratio goes from 1.1203
-# to 1.1236, which matters here because this family's Bold is only one step above its Regular
-# (JetBrains Light 300 vs Regular 400).
+#   control_buffer="* dflt width 74\n"
+#       The shipped nudge, and the only setting here that is a preference rather than a fix. See
+#       THE FINE DIAL below for what it buys, what it costs, and the case against it.
 #
-# These numbers were re-measured for this change. The harness that produced the figures quoted in
-# commits 34aed65 and 5bbd30c was never committed, so absolute values differ from those; the
-# ordering of the rows and the direction of every delta agree. The metric is a proxy for crispness
-# -- it is not legibility, and only FreeType grayscale can be driven from here.
+# THE FINE DIAL. The stem width *mode* is coarse, but the standard stem width itself is a number,
+# and control instructions can set it:
+#
+#     control_buffer="* dflt width N\n"        (N in font units)
+#
+# ttfautohint auto-detects 71 for JetBrains Mono Light -- verified, not guessed: `width 71` renders
+# identically to leaving it auto (same glyf bytes, same measurements to four decimals). Measured on
+# letters and digits, 9-18 ppem, against that baseline:
+#       66-69     -12% crisp, -1.5% ink        a cliff, not a nudge
+#       70        -3.9% crisp, -0.3% ink       a little softer
+#       71        auto -- what ttfautohint measures from the outlines
+#       74        +2.1% crisp, +0.9% ink       SHIPPED -- the smallest perceptible step up
+#       75-77     +1.9 to +2.7% crisp, +1.3 to +1.9% ink
+#       78-80     +3.7 to +4.0% crisp, +2.5% ink
+#       90+       +14% and up -- back in STRONG territory
+# Two caveats. It is steppy rather than smooth: quantized mode snaps to a set of widths, so 72 and
+# 73 measure slightly *below* 71 rather than above. And it moves weight as well as crispness --
+# roughly +0.3% ink per unit -- so it doubles as a weight trim, which on a Light-based family is
+# not nothing. `latn dflt width N` is NOT a way to spare the symbols, which is the
+# obvious guess and wrong: fallback_script is latn, so the symbol glyphs are hinted *as*
+# latin and take the same width. Measured identical to `* dflt` on letters and symbols
+# alike; at width 76, 15 box-drawing glyphs change under either form.
+#
+# The case against shipping any width, recorded because it was argued and overruled rather than
+# missed: 71 is not a default, it is a *measurement of this typeface* -- ttfautohint derives it from
+# the stems of the standard characters as drawn. Overriding it to 74 tells the hinter the stems are
+# thicker than they are, and the +0.9% ink says the rest: at 13-17ppem the font renders slightly
+# heavier than JetBrains Mono Light actually is. On a family whose entire premise is being one step
+# light (JB Light as Regular), that partly argues with itself, and the honest lever for weight is
+# the source weight rather than the hint. 74 was chosen anyway, deliberately, as the smallest step
+# that reads: +0.9% ink is close to nothing, and the alternative was shipping a font its owner finds
+# a shade soft. 78-80 were rejected on exactly this ground -- there the weight gain is visible.
+#
+# It also costs a guarantee. Control instructions add `cvt ` entries, so `cvt ` is no longer
+# byte-identical to the source and has moved out of validate.py's PRESERVED set into the re-hinted
+# one. That is a deliberate, recorded widening of the build's scope, not a silenced check.
 #
 # Rejected after measuring -- recorded so none of it gets retried on a hunch:
+#   x_height_snapping_exceptions="-"   -5.5% crisp and -3.7% ink, the largest move still available
+#                            while staying hinted; built as a side-by-side family and read in situ.
+#                            No real improvement, and it costs a pixel of x-height at 13/15/17ppem.
+#   increase_x_height        a threshold, not a dial: 0/10/12 all measure -6.0%, 18/24/32 all
+#                            measure identical to the default 14. Nothing usable in between.
+#   hinting_range_min=14     a no-op; below range-min ttfautohint reuses the smallest hint set.
+#   hinting_limit=N          not a dial but a cliff -- hinting stops entirely above N ppem.
 #   hint_composites          identical metrics even on composite glyphs (accented letters, and the
 #                            27 composite ligature glyphs), and +53KB a face. Composites inherit
 #                            their components' hinting, which is already correct.
 #   adjust_subglyphs         accent separation fell 0.865 -> 0.816, and +95KB a face.
-#   x_height_snapping_exceptions="6-16"   +1% crispness, but accent separation fell to 0.812.
 #   windows_compatibility    identical metrics, and it would rewrite the usWin metrics the family
 #                            deliberately keeps as shipped.
-#   increase_x_height        0/12/16/18 all no gain.
 #   hinting_range_max=72     identical even measured at 52-72ppem, where alone it could matter.
 #   --reference              the faces already agree on x-height, cap-height and baseline at every
 #                            ppem from 9 to 24, so sharing blue zones would change nothing.
 #   fallback_scaling         actively harmful: accent separation collapsed 0.86 -> 0.16.
 HINT_OPTIONS = dict(
     fallback_script="latn",
-    gray_stem_width_mode=StemWidthMode.NATURAL,
-    dw_cleartype_stem_width_mode=StemWidthMode.NATURAL,
+    control_buffer="* dflt width 74\n",
     TTFA_info=True,
 )
 
