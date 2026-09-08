@@ -5,8 +5,9 @@ The family is a rebrand of **JetBrains Mono**, shifted one step lighter: JetBrai
 ships as `rnetonet`'s Regular, and its Regular ships as `rnetonet`'s Bold.
 
 The sources are already static, so nothing is instanced or interpolated and **no outline is ever
-redrawn**. The build does two things: re-hints at stock ttfautohint settings plus a latin fallback
-script (so the symbol glyphs get hinted too), and rebrands the metadata. `validate.py` proves the scope by comparing every glyph point coordinate against the
+redrawn**. The build does two things: re-hints -- close to stock ttfautohint settings, with a latin
+fallback script so the symbol glyphs get hinted too and the softest stem width mode so the letters
+do not read brittle -- and rebrands the metadata. `validate.py` proves the scope by comparing every glyph point coordinate against the
 source and diffing every table the build has no business touching.
 
 ```
@@ -67,55 +68,60 @@ and are kept exactly as shipped, so line height is stable across the family.
 
 Upstream JetBrains Mono 2.304 is hinted with **stock ttfautohint defaults**. That is verified
 rather than assumed: re-running ttfautohint with no options at all reproduces its `fpgm`, `prep`,
-`cvt ` and `glyf` byte for byte. One of those defaults is wrong for a coding font, and it is the
-only one this build changes.
+`cvt ` and `glyf` byte for byte. Two of those defaults are changed here.
 
 | Parameter | Default | Ours | Why |
 |---|---|---|---|
 | `fallback-script` | `none` | `latn` | `none` means every glyph outside a recognised script gets **no hinting at all** -- here that is 128 box-drawing glyphs, 32 block elements, 21 arrows, 62 math symbols and 43 geometric shapes: exactly what a terminal draws TUI borders, tables, tree views and progress bars with. Affects symbols only. |
+| `gray-` and `dw-cleartype-stem-width-mode` | `quantized` | `natural` | The softest setting ttfautohint has: stem widths are not pulled towards the pixel grid at all, so edges keep their fractional coverage. Upstream's `quantized` read harder-edged than this family wants. Affects letters, digits and punctuation. |
+| `gdi-cleartype-stem-width-mode` | `strong` | *unchanged* | Only Windows GDI ClearType takes that branch, and nothing in this pipeline can render it -- softening it would be a change made blind. |
 | `TTFA-info` | off | on | Writes the `TTFA` table so a built font states how it was hinted. |
-| *stem width modes* | quantized / quantized / strong | *unchanged* | Set to `strong` in commit `34aed65`, reverted in `HEAD` -- see below. |
 
-So the shipped hinting is exactly `ttfautohint --fallback-script=latn`, and the build reproduces
-that byte for byte.
+So the shipped hinting is exactly `ttfautohint --fallback-script=latn --stem-width-mode=nsn`, and
+the build reproduces that byte for byte.
 
-### The stem-width modes, and why they are back at their defaults
+### The stem-width modes, and how this family ended up on `natural`
 
-Commit `34aed65` set `gray-` and `dw-cleartype-stem-width-mode` to `strong`, which snaps stem
-widths hard onto whole pixels instead of merely quantizing them. It measured well and **was
-reverted anyway: in daily use the text read too hard-edged.** The measurements are kept here
-because they are the only record of what the setting costs and buys, and someone will be tempted
-by them again.
+The three modes differ only in how far a stem width may be pulled towards the pixel grid, and this
+family has now been through all three:
 
-ttfautohint emits a `prep` that branches on rendering mode, and which branch reaches whom is easy
-to get backwards. FreeType's default **v40 interpreter emulates ClearType**, so it takes the
-*DirectWrite* branch -- not the grayscale one. Isolating each mode made that unambiguous:
+| mode | effect | symbols | letters + digits | Bold/Regular ink ratio |
+|---|---|---|---|---|
+| `natural` | **shipped**; no rounding at all, softest | 0.2978 | 0.0786 | 1.1236 |
+| `quantized` | ttfautohint's default, and what upstream JetBrains Mono ships | 0.3041 | 0.0800 | 1.1203 |
+| `strong` | stems snapped onto whole pixels; crispest | 0.3819 | 0.1059 | 1.0938 |
 
-| variant | symbols | letters + digits | Bold/Regular ink ratio |
-|---|---|---|---|
-| upstream defaults | 0.4385 | 0.0744 | 1.1204 |
-| **`fallback-script=latn` (ours)** | **0.4565** | 0.0744 | 1.1204 |
-| `latn` + `gdi=strong` | 0.4565 | 0.0744 | 1.1204 |
-| `latn` + `dw=strong` (reverted) | 0.5169 | 0.1038 | 1.1115 |
+`strong` was set in commit `34aed65` and reverted in `5bbd30c`: it measured far crisper and **read
+brittle in daily use**. `natural` is the same axis in the other direction, and the honest headline
+is that it is a *small* move -- -1.7% on letters and digits, -2.1% on symbols, against the +32%
+`strong` had added. Stem width mode is the only softness flag ttfautohint offers and this is its
+softest setting; if the family still reads too hard, no other flag will fix it (see below).
+
+What `natural` does buy outright is weight separation: the Bold/Regular ink ratio goes from 1.1203
+to 1.1236. That matters more here than it normally would, because this family's Bold is only one
+step above its Regular (JetBrains Light 300 vs Regular 400) -- and it is exactly what `strong` was
+spending, at 1.0938.
 
 Measured as the fraction of ink rendered at full saturation rather than smeared into half-grays,
-over 9-18 ppem. The shipped configuration takes **+4.1% on symbols** and leaves letters, digits and
-weight contrast exactly where upstream has them. `strong` would have added +39.5% on letters and
-digits -- not extra weight, since total ink coverage moves -0.13%; the same ink simply lands
-decisively instead of blurring -- and that decisiveness is precisely what read as too crisp.
+over 9-18 ppem on the Light face; the ink ratio is the same measurement run over both roman faces.
+ttfautohint emits a `prep` that branches on rendering mode, and which branch reaches whom is easy
+to get backwards: FreeType's default **v40 interpreter emulates ClearType**, so it takes the
+*DirectWrite* branch, not the grayscale one. That is why `dw-` is the mode that actually moves
+these numbers, and `gray-` is set alongside it only for the legacy v35 interpreter.
 
-`strong` also narrowed the Bold/Regular weight contrast from a 1.1204 ink ratio to 1.1115 (-0.8%),
-which matters more here than it normally would, because this family's Bold is only one step above
-its Regular (JetBrains Light 300 vs Regular 400).
+These figures were re-measured for the `natural` change. The harness behind the numbers quoted in
+commits `34aed65` and `5bbd30c` was never committed, so the absolute values here do not match those
+-- the row ordering and the direction of every delta do.
 
-The dial, if the family ever reads as too *soft*, is `dw-cleartype-stem-width-mode`
-(`gray-` alongside it, for the legacy interpreter):
+### If it still reads too crisp
 
-| mode | effect | Bold/Regular contrast |
+Nothing left in ttfautohint's flags will help; the remaining levers each give up something real:
+
+| Lever | What it does | What it costs |
 |---|---|---|
-| `natural` | no snapping at all -- softer than upstream | 1.1231 |
-| `quantized` | **shipped**; identical to upstream JetBrains Mono | 1.1204 |
-| `strong` | stems snapped to whole pixels; crispest, and too crisp here | 1.1115 |
+| `hinting-limit=N` (needs `hinting-range-max<=N`) | stops hinting above N ppem | measured identical to plain `natural` across 9-18 ppem, so it only changes sizes above the limit |
+| `dehint`, or shipping the sources unhinted | pure outline anti-aliasing, macOS-style | gives up the symbol hinting this build exists for, and `validate.py`'s smart-dropout, `fpgm`/`prep` and `TTFA` checks would all have to go |
+| `control-instructions` | per-glyph, per-ppem manual fixes | the real foundry lever, and it needs per-glyph visual review rather than a metric |
 
 Rejected after measuring, not by taste -- recorded so none of it gets retried on a hunch:
 
@@ -129,7 +135,7 @@ Rejected after measuring, not by taste -- recorded so none of it gets retried on
 | `hinting-range-max=72` | Identical even when measured at 52-72 ppem, the only range where it could matter. |
 | shared `--reference` | The faces already agree on x-height, cap-height and baseline at every ppem from 9 to 24. |
 | `fallback-scaling` | Actively harmful: accent separation collapsed 0.86 -> 0.16. |
-| per-face stem modes | Regular `strong` + Bold `quantized`, tried while `strong` was still in: recovers only +0.06% of the contrast (1.1115 -> 1.1122) while costing Bold a fifth of its crispness gain. Moot now that the stem modes are back at their defaults. |
+| per-face stem modes | Regular `strong` + Bold `quantized`, tried while `strong` was still in: recovered only +0.06% of the weight contrast while costing Bold a fifth of its crispness gain. |
 | `gasp` tuning | Built and installed as a separate family (`{20: 0x07, 65535: 0x0F}` -- no ClearType symmetric smoothing at or below 20 ppem) and compared side by side in a real editor on Windows/DirectWrite, since FreeType ignores `gasp` and the harness here is blind to it. **No visible difference**, so the variant was dropped and `gasp` stays exactly as upstream ships it. |
 
 ### Known limits of this tuning
@@ -141,7 +147,12 @@ The parameter search is exhausted, but the *quality* ceiling is not:
   the biggest remaining lever, and it needs per-glyph visual review rather than a metric.
 - **Only FreeType grayscale was measured.** DirectWrite, CoreText and subpixel/LCD ClearType were
   not -- they cannot be driven from this pipeline. That gap is part of why the `strong` stem mode
-  was reverted on how it actually looked rather than on its numbers.
+  was reverted on how it actually looked rather than on its numbers, and it is why `natural` should
+  be judged the same way: a 2% move on a proxy metric is well inside the range where only daily
+  reading can say whether it helped.
+- **The measurement harness is not in the repo.** The numbers above are reproducible in principle
+  -- render at 9-18 ppem through FreeType and count fully-saturated pixels -- but nothing in the
+  pipeline re-runs them, so they age silently.
 - **The metric is a proxy.** "Fraction of fully-saturated ink" tracks crispness; it is not
   legibility, and no systematic human review was done across the full character set.
 - **The 153 ligature glyphs were never rendered.** They are not reachable by codepoint without
