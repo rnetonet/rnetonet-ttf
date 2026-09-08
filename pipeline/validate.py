@@ -4,13 +4,15 @@ Four stages, each of which can fail the run (non-zero exit) so this doubles as a
 
 1. OTS (OpenType Sanitizer) must accept every output -- the hard "will browsers and rasterizers
    actually load this" bar.
-2. Rebrand scope: `build.py` claims to change metadata and nothing else, and this proves it. Every
-   table except `name`, `OS/2` and `head` must be **byte-identical** to the JetBrains Mono source
-   the file was built from, and `STAT` must be the only table added. That single sweep covers the
-   outlines (`glyf`/`loca`), the whole ttfautohint hinting program (`fpgm`/`prep`/`cvt `/`gasp` and
-   every per-glyph instruction stream), the layout tables that carry the coding ligatures and
-   stylistic sets (`GSUB`/`GPOS`/`GDEF`), plus `cmap`, `hmtx`, `hhea`, `maxp` and `post`. The
-   hinting and outline tables are also called out individually so a failure names the culprit.
+2. Build scope: `build.py` re-hints and rebrands, and nothing else. `glyf` legitimately changes --
+   instruction streams live in it -- so byte-identity is the wrong test there; instead **every
+   glyph point coordinate** is compared against the source, which is what "no outline was redrawn"
+   actually means. Only the hinting tables (`fpgm`/`prep`/`glyf`/`loca`/`maxp`) and the metadata
+   tables (`name`/`OS/2`/`head`) may differ; `STAT` and `TTFA` are the only additions. The layout
+   tables carrying the ligatures and stylistic sets (`GSUB`/`GPOS`/`GDEF`), plus `cmap`, `hmtx`,
+   `hhea`, `post`, `cvt ` and `gasp`, must still be byte-identical. Finally the `TTFA` table is
+   read back and asserted to carry the exact ttfautohint parameters `build.py` commits to, so the
+   hinting configuration cannot drift silently.
 3. Structural RIBBI checks: one shared family name, correct subfamilies / weight classes / style
    bits, no JetBrains branding left in the identity strings, no NUL bytes smuggled into a name
    record, integer-PPEM `head.flags` bit, STAT present, `fvar` absent (these are statics),
@@ -51,13 +53,23 @@ SRC_DIR = os.path.join(REPO, FAMILY, "sources")
 ITALIC, BOLD, REGULAR, USE_TYPO, WWS = 1 << 0, 1 << 5, 1 << 6, 1 << 7, 1 << 8
 SMART_DROPOUT = bytes([0xB8, 0x01, 0xFF, 0x85, 0xB0, 0x04, 0x8D])
 
-# Tables `build.py` is allowed to touch. Everything else must survive byte for byte.
-REWRITTEN = {"name", "OS/2", "head"}
-ADDED = {"STAT"}
+# What each stage of `build.py` is allowed to touch.
+REBRANDED = {"name", "OS/2", "head"}          # metadata rewrite
+REHINTED = {"fpgm", "prep", "glyf", "loca", "maxp"}   # ttfautohint output (instructions only)
+ADDED = {"STAT", "TTFA"}                      # STAT by the rebrand, TTFA by ttfautohint
 
-# Called out separately so a failure says "the hinting moved" rather than just "a table moved".
-HINTING_TABLES = ("fpgm", "prep", "cvt ", "gasp")
-OUTLINE_TABLES = ("glyf", "loca")
+# Must survive byte for byte: the layout tables carrying ligatures and stylistic sets, the
+# character map, the metrics, and the control values / gasp that re-hinting happens not to move.
+PRESERVED = ("GDEF", "GPOS", "GSUB", "cmap", "hmtx", "hhea", "post", "cvt ", "gasp")
+
+# The ttfautohint parameters `build.py` commits to, as they appear in the TTFA table. Asserting
+# these is what stops the hinting config from drifting silently.
+EXPECTED_TTFA = {
+    "fallback-script": "latn",
+    "gray-stem-width-mode": "strong",
+    "gdi-cleartype-stem-width-mode": "strong",
+    "dw-cleartype-stem-width-mode": "strong",
+}
 
 # Vertical metric fields that must match the source and each other -- these set line height, so
 # drift between faces would make mixed-weight text jump.
@@ -76,8 +88,8 @@ EXPECTED_FAILS = {
     "family/win_ascent_and_descent",
 }
 
-# filename -> expected structural properties, including the JetBrains Mono file it was rebranded
-# from, so everything the rebrand must not touch can be diffed against it.
+# filename -> expected structural properties, including the JetBrains Mono file it was built
+# from, so everything the build must not touch can be diffed against it.
 SPECS = {
     "rnetonet-Regular.ttf": dict(subfamily="Regular", weight=400, bold=False, italic=False,
                                  source="JetBrainsMono-Light.ttf"),
@@ -113,12 +125,49 @@ def stage_ots(report):
         report.check(result.returncode == 0, f"{fn} sanitizes", detail.strip())
 
 
-def stage_rebrand_scope(report):
-    """Prove the rebrand is metadata-only: only `name`/`OS/2`/`head` differ, only `STAT` is new."""
-    print("\n== Rebrand scope (everything but metadata must be byte-identical) ==")
+def glyph_coordinates(path):
+    """Every glyph's point coordinates (component offsets for composites).
+
+    This is what must survive re-hinting. `glyf` bytes legitimately change -- the instruction
+    stream lives in there -- but not a single coordinate may move, or an outline was redrawn.
+    """
+    font = TTFont(path)
+    glyf = font["glyf"]
+    out = {}
+    for name in font.getGlyphOrder():
+        glyph = glyf[name]
+        glyph.expand(glyf)
+        if glyph.isComposite():
+            out[name] = [(c.glyphName, getattr(c, "x", 0), getattr(c, "y", 0))
+                         for c in glyph.components]
+        elif glyph.numberOfContours:
+            out[name] = list(glyph.coordinates)
+        else:
+            out[name] = []
+    return out
+
+
+def parse_ttfa(font):
+    """The TTFA table as a dict of ttfautohint parameter -> value."""
+    if "TTFA" not in font:
+        return {}
+    text = font.getTableData("TTFA").decode("utf-8", "replace")
+    out = {}
+    for line in text.splitlines():
+        if "=" in line:
+            key, _, value = line.partition("=")
+            out[key.strip()] = value.strip()
+    return out
+
+
+def stage_scope(report):
+    """Prove the build only re-hints and rebrands: no outline moves, no layout table changes."""
+    print("\n== Build scope (outlines and layout must survive; only hinting + metadata change) ==")
     for fn, spec in SPECS.items():
-        font = TTFont(os.path.join(OUT_DIR, fn), lazy=True)
-        source = TTFont(os.path.join(SRC_DIR, spec["source"]), lazy=True)
+        out_path = os.path.join(OUT_DIR, fn)
+        src_path = os.path.join(SRC_DIR, spec["source"])
+        font = TTFont(out_path, lazy=True)
+        source = TTFont(src_path, lazy=True)
         out_tags = set(font.keys()) - {"GlyphOrder"}
         src_tags = set(source.keys()) - {"GlyphOrder"}
 
@@ -127,21 +176,29 @@ def stage_rebrand_scope(report):
         report.check(not src_tags - out_tags, f"{fn}: no source table dropped",
                      f"missing {sorted(src_tags - out_tags)}")
 
-        shared = sorted(out_tags & src_tags)
-        changed = [t for t in shared if font.getTableData(t) != source.getTableData(t)]
-        report.check(set(changed) <= REWRITTEN,
-                     f"{fn}: only {sorted(REWRITTEN)} rewritten vs {spec['source']}",
-                     f"also changed {sorted(set(changed) - REWRITTEN)}")
+        changed = {t for t in out_tags & src_tags
+                   if font.getTableData(t) != source.getTableData(t)}
+        report.check(changed <= REBRANDED | REHINTED,
+                     f"{fn}: only hinting + metadata tables changed vs {spec['source']}",
+                     f"also changed {sorted(changed - REBRANDED - REHINTED)}")
 
-        # Name the tables that matter most, so a regression reads clearly.
-        for tag in HINTING_TABLES + OUTLINE_TABLES:
+        # The guarantee that survives re-hinting: not one coordinate moved.
+        report.check(glyph_coordinates(out_path) == glyph_coordinates(src_path),
+                     f"{fn}: every glyph outline coordinate identical to source")
+
+        for tag in PRESERVED:
             if tag in src_tags:
                 report.check(font.getTableData(tag) == source.getTableData(tag),
                              f"{fn}: {tag.strip()} byte-identical to source")
-        for tag in ("GSUB", "GPOS", "GDEF", "cmap", "hmtx", "post"):
-            if tag in src_tags:
-                report.check(font.getTableData(tag) == source.getTableData(tag),
-                             f"{fn}: {tag} byte-identical to source")
+
+        # Re-hinting must actually have happened, and with the parameters we committed to.
+        for tag in ("fpgm", "prep", "cvt "):
+            report.check(len(font.getTableData(tag)) > 0, f"{fn}: {tag.strip()} present and non-empty")
+        ttfa = parse_ttfa(font)
+        report.check(bool(ttfa), f"{fn}: TTFA table records the hinting parameters")
+        for key, want in EXPECTED_TTFA.items():
+            report.check(ttfa.get(key) == want, f"{fn}: TTFA {key} == {want}",
+                         f"got {ttfa.get(key)!r}")
 
 
 def stage_structure(report):
@@ -291,7 +348,7 @@ def main():
 
     report = Report()
     stage_ots(report)
-    stage_rebrand_scope(report)
+    stage_scope(report)
     stage_structure(report)
     stage_fontbakery(report)
 

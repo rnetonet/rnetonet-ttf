@@ -8,19 +8,28 @@ ships as the family's Regular, and its Regular ships as the family's Bold.
     rnetonet/sources/JetBrainsMono-LightItalic.ttf  (300) -> rnetonet-RegularItalic.ttf  (-> 400)
     rnetonet/sources/JetBrainsMono-Italic.ttf       (400) -> rnetonet-BoldItalic.ttf     (-> 700)
 
-The sources are already static, so **nothing is instanced, interpolated or re-hinted** -- this is a
-metadata rebrand and nothing more. Outlines (`glyf`/`loca`), hinting (`fpgm`/`prep`/`cvt `/`gasp`
-and every per-glyph instruction stream), layout (`GSUB`/`GPOS`/`GDEF`), `cmap`, `hmtx` and `post`
-are all passed through byte for byte; `validate.py` asserts exactly that. Only four tables change:
+The sources are already static, so **nothing is instanced or interpolated and no outline is ever
+redrawn**. Two things happen: the fonts are re-hinted with tuned ttfautohint parameters, and the
+metadata is rebranded.
 
-    name    rebranded (see below)
-    OS/2    usWeightClass, fsSelection style bits
-    head    macStyle style bits
-    STAT    added -- the sources ship none, and a RIBBI family should declare its axis positions
+Glyph *outlines* come through untouched -- `validate.py` compares every point coordinate against
+the source -- as do the layout tables that carry the ligatures and stylistic sets
+(`GSUB`/`GPOS`/`GDEF`), plus `cmap`, `hmtx`, `hhea`, `post`, `cvt ` and `gasp`. What changes:
 
-JetBrains Mono is hinted with ttfautohint and already carries the smart-dropout instruction in
-`prep`, so there is no dropout patch to apply and `head.flags` already has its integer-PPEM bit. Its
-vertical metrics (typo 1020/-300/0, win 1020/300, upem 1000) are identical across all four faces
+    fpgm/prep/glyf  re-hinted (instruction streams only; coordinates are identical)
+    TTFA            added by ttfautohint -- records every parameter used, so the hinting is auditable
+    name            rebranded, plus the ttfautohint version stamp in nameID 5
+    OS/2            usWeightClass, fsSelection style bits
+    head            macStyle style bits
+    STAT            added -- the sources ship none, and a RIBBI family should declare its axis positions
+
+Upstream JetBrains Mono 2.304 is hinted with **stock ttfautohint defaults** -- verified, not
+assumed: re-running ttfautohint with no options reproduces its `fpgm`, `prep`, `cvt ` and `glyf`
+byte for byte. Defaults are generic, and two of them leave real quality on the table for a coding
+font; see HINT_OPTIONS below for what we change and why. The smart-dropout instruction and the
+integer-PPEM `head.flags` bit survive re-hinting, so there is still no dropout patch to apply.
+
+Vertical metrics (typo 1020/-300/0, win 1020/300, upem 1000) are identical across all four faces
 and are kept exactly as shipped, so line height is stable across the family.
 
 JetBrains Mono's coding ligatures are carried over untouched: they live in `calt`, which stays as
@@ -41,10 +50,12 @@ Usage:
 Run `python pipeline/validate.py` afterwards to sanity-check the four outputs.
 """
 
+import io
 import os
 
 from fontTools.otlLib.builder import buildStatTable
 from fontTools.ttLib import TTFont
+from ttfautohint import StemWidthMode, ttfautohint
 
 # Repo root, resolved from this file so the pipeline runs from any working directory.
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -55,6 +66,73 @@ WINDOWS = (3, 1, 0x409)
 
 ITALIC, BOLD, REGULAR, USE_TYPO, WWS = 1 << 0, 1 << 5, 1 << 6, 1 << 7, 1 << 8
 ELIDABLE = 0x2
+
+# ttfautohint parameters. Upstream ships stock defaults; these are the two departures that measure
+# better for a coding font, plus the info table. Everything else stays at its default, deliberately.
+#
+#   fallback_script="latn"
+#       THE one that matters. The default, "none", means any glyph outside a recognised script gets
+#       no hinting at all -- and in this font that is 128 box-drawing glyphs, 32 block elements,
+#       21 arrows, 62 math symbols and 43 geometric shapes. Exactly the glyphs a terminal draws
+#       TUI borders, tables, tree views and progress bars with. Hinting them against latin blue
+#       zones snaps their rules onto the pixel grid instead of smearing them across two rows.
+#
+#   *_stem_width_mode=STRONG
+#       Snaps stem widths hard to the grid rather than merely quantizing them. ttfautohint emits a
+#       `prep` that branches on the rendering mode, and each renderer takes a different branch, so
+#       which of these three actually reaches a given user is worth being precise about:
+#           dw_cleartype  -> FreeType's default v40 interpreter, and DirectWrite. v40 emulates
+#                            ClearType, so this is the one nearly every modern reader gets. It is
+#                            what drives the numbers below -- measured by isolating each mode.
+#           gray          -> only the legacy v35 interpreter (grayscale, full hinting).
+#           gdi_cleartype -> only Windows GDI ClearType. Already STRONG by default; set anyway so
+#                            the configuration is complete rather than half-explicit.
+#       All three are set so every rendering path gets the same treatment. No size cost.
+#
+#   TTFA_info=True
+#       Writes a TTFA table listing every parameter used, so a built font says how it was hinted.
+#
+# Measured on the Light face, as the fraction of ink rendered at full saturation rather than smeared
+# into half-grays, over 9-18 ppem:
+#                                   symbols   letters+digits   Bold/Regular ink ratio
+#   upstream defaults                0.4385       0.0744               1.1204
+#   fallback_script=latn alone       0.4565       0.0744               1.1204
+#   + dw_cleartype STRONG (ours)     0.5169       0.1038               1.1115
+# i.e. +17.9% on symbols and +39.5% on letters and digits. The letter gain is NOT extra weight:
+# total ink coverage moves -0.13%, so the same ink simply lands decisively instead of blurring.
+# Across the family the letter gain runs +25% (Bold) to +56% (Regular Italic), counters stay fully
+# open, and italic accent separation improves from 0.826 to 0.865.
+#
+# The one real cost, stated plainly: snapping stems to whole pixels narrows the Bold/Regular weight
+# contrast slightly, from a 1.1204 ink ratio to 1.1115 (-0.8%). That matters more here than it
+# usually would, because this family's Bold is only one step up from its Regular (JetBrains Light
+# 300 vs Regular 400). It is a small price for a large legibility gain, but if the family ever reads
+# as too flat between Regular and Bold, `dw_cleartype_stem_width_mode` is the dial: NATURAL restores
+# the contrast (1.1231) and gives up the crispness.
+#
+# Rejected after measuring -- recorded so none of it gets retried on a hunch:
+#   hint_composites          identical metrics even on composite glyphs (accented letters, and the
+#                            27 composite ligature glyphs), and +53KB a face. Composites inherit
+#                            their components' hinting, which is already correct.
+#   adjust_subglyphs         accent separation fell 0.865 -> 0.816, and +95KB a face.
+#   x_height_snapping_exceptions="6-16"   +1% crispness, but accent separation fell to 0.812.
+#   windows_compatibility    identical metrics, and it would rewrite the usWin metrics the family
+#                            deliberately keeps as shipped.
+#   increase_x_height        0/12/16/18 all no gain.
+#   hinting_range_max=72     identical even measured at 52-72ppem, where alone it could matter.
+#   --reference              the faces already agree on x-height, cap-height and baseline at every
+#                            ppem from 9 to 24, so sharing blue zones would change nothing.
+#   fallback_scaling         actively harmful: accent separation collapsed 0.86 -> 0.16.
+#   per-face stem modes      Regular STRONG + Bold QUANTIZED, tried to buy back the contrast above:
+#                            recovers only +0.06% (1.1115 -> 1.1122) while costing Bold a fifth of
+#                            its crispness gain. The contrast cost is inherent to grid-snapping.
+HINT_OPTIONS = dict(
+    fallback_script="latn",
+    gray_stem_width_mode=StemWidthMode.STRONG,
+    gdi_cleartype_stem_width_mode=StemWidthMode.STRONG,
+    dw_cleartype_stem_width_mode=StemWidthMode.STRONG,
+    TTFA_info=True,
+)
 
 # Names that describe JetBrains Mono and must not survive the rename. 1-6 are rewritten; 7 is the
 # JetBrains trademark line; 16/17 are the typographic family/subfamily, which the Light faces carry
@@ -105,35 +183,48 @@ ROMAN_ITAL = dict(value=0, name="Roman", flags=ELIDABLE, linkedValue=1)
 ITALIC_ITAL = dict(value=1, name="Italic")
 
 BUILDS = [
-    # source, outfile, subfamily, ps suffix, weightclass, bold, italic, stat wght, stat ital
-    ("JetBrainsMono-Light.ttf", "rnetonet-Regular.ttf", "Regular", "Regular",
+    # The filename suffix and the PostScript suffix are deliberately not the same for the roman
+    # italic: the file is named for its role in the family (RegularItalic), while the PostScript
+    # name follows the RIBBI convention (Italic).
+    # source, subfamily, file suffix, ps suffix, weightclass, bold, italic, stat wght, stat ital
+    ("JetBrainsMono-Light.ttf", "Regular", "Regular", "Regular",
      400, False, False, REGULAR_WGHT, ROMAN_ITAL),
-    ("JetBrainsMono-Regular.ttf", "rnetonet-Bold.ttf", "Bold", "Bold",
+    ("JetBrainsMono-Regular.ttf", "Bold", "Bold", "Bold",
      700, True, False, BOLD_WGHT, ROMAN_ITAL),
-    ("JetBrainsMono-LightItalic.ttf", "rnetonet-RegularItalic.ttf", "Italic", "Italic",
+    ("JetBrainsMono-LightItalic.ttf", "Italic", "RegularItalic", "Italic",
      400, False, True, REGULAR_WGHT, ITALIC_ITAL),
-    ("JetBrainsMono-Italic.ttf", "rnetonet-BoldItalic.ttf", "Bold Italic", "BoldItalic",
+    ("JetBrainsMono-Italic.ttf", "Bold Italic", "BoldItalic", "BoldItalic",
      700, True, True, BOLD_WGHT, ITALIC_ITAL),
 ]
+
 
 
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
 
-    for src, out, subfamily, ps_suffix, weight_class, bold, italic, stat_w, stat_i in BUILDS:
+    for (src, subfamily, file_suffix, ps_suffix, weight_class, bold, italic,
+         stat_w, stat_i) in BUILDS:
         src_path = os.path.join(SRC_DIR, src)
-        font = TTFont(src_path)
-        name, os2, head = font["name"], font["OS/2"], font["head"]
 
-        # Probe the layout tables on a throwaway handle. Reading GSUB through `font` would
-        # decompile it, and fontTools would then recompile it on save -- semantically identical
-        # but repacked, so the bytes would drift. Untouched tables stay untouched this way.
+        # Re-hint first, then rebrand the result -- so the name table we write is the final word
+        # and ttfautohint cannot stamp over it.
+        with open(src_path, "rb") as handle:
+            hinted = ttfautohint(in_buffer=handle.read(), **HINT_OPTIONS)
+
+        # Probe the layout tables on a throwaway handle. Reading GSUB through the font we save
+        # would decompile it, and fontTools would then recompile it on save -- semantically
+        # identical but repacked, so the bytes would drift. Untouched tables stay untouched.
         keep = referenced_name_ids(TTFont(src_path, lazy=True))
+
+        out = f"{FAMILY}-{file_suffix}.ttf"
+        font = TTFont(io.BytesIO(hinted))
+        name, os2, head = font["name"], font["OS/2"], font["head"]
 
         # Read source version/unique-id parts before the drop step removes them.
         version = name.getDebugName(5) or "Version 1.000"
         id3 = name.getDebugName(3) or ""
-        ver_num = id3.split(";")[0] if id3.split(";")[0] else version.replace("Version ", "").split(";")[0].strip()
+        ver_num = (id3.split(";")[0] if id3.split(";")[0]
+                   else version.replace("Version ", "").split(";")[0].strip())
         ps_name = f"{FAMILY}-{ps_suffix}"
         vend = vendor_id(os2)
 
@@ -178,7 +269,7 @@ def main():
             f"{src:<30} -> {out:<28} w={weight_class} "
             f"typo={'Y' if os2.fsSelection & USE_TYPO else 'n'} "
             f"win={os2.usWinAscent}/{os2.usWinDescent} upem={head.unitsPerEm} "
-            f"names={len(name.names)} ss_labels={sorted(keep)}"
+            f"names={len(name.names)} ss_labels={sorted(keep)} TTFA={'TTFA' in font}"
         )
 
 
