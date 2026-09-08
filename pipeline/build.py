@@ -9,8 +9,8 @@ ships as the family's Regular, and its Regular ships as the family's Bold.
     rnetonet/sources/JetBrainsMono-Italic.ttf       (400) -> rnetonet-BoldItalic.ttf     (-> 700)
 
 The sources are already static, so **nothing is instanced or interpolated and no outline is ever
-redrawn**. Two things happen: the fonts are re-hinted with tuned ttfautohint parameters, and the
-metadata is rebranded.
+redrawn**. Two things happen: the fonts are re-hinted -- at stock ttfautohint settings but with a
+latin fallback script, so the symbol glyphs get hinted too -- and the metadata is rebranded.
 
 Glyph *outlines* come through untouched -- `validate.py` compares every point coordinate against
 the source -- as do the layout tables that carry the ligatures and stylistic sets
@@ -25,9 +25,12 @@ the source -- as do the layout tables that carry the ligatures and stylistic set
 
 Upstream JetBrains Mono 2.304 is hinted with **stock ttfautohint defaults** -- verified, not
 assumed: re-running ttfautohint with no options reproduces its `fpgm`, `prep`, `cvt ` and `glyf`
-byte for byte. Defaults are generic, and two of them leave real quality on the table for a coding
-font; see HINT_OPTIONS below for what we change and why. The smart-dropout instruction and the
-integer-PPEM `head.flags` bit survive re-hinting, so there is still no dropout patch to apply.
+byte for byte. One default is wrong for a coding font -- `fallback-script=none` leaves every
+box-drawing and block glyph unhinted -- so that is the single parameter this build changes, and
+letters, digits and punctuation come out hinted exactly as upstream ships them. See HINT_OPTIONS
+below, which also records the stem-width tuning that was tried and reverted. The smart-dropout
+instruction and the integer-PPEM `head.flags` bit survive re-hinting, so there is still no dropout
+patch to apply.
 
 Vertical metrics (typo 1020/-300/0, win 1020/300, upem 1000) are identical across all four faces
 and are kept exactly as shipped, so line height is stable across the family.
@@ -55,7 +58,7 @@ import os
 
 from fontTools.otlLib.builder import buildStatTable
 from fontTools.ttLib import TTFont
-from ttfautohint import StemWidthMode, ttfautohint
+from ttfautohint import ttfautohint
 
 # Repo root, resolved from this file so the pipeline runs from any working directory.
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -67,27 +70,37 @@ WINDOWS = (3, 1, 0x409)
 ITALIC, BOLD, REGULAR, USE_TYPO, WWS = 1 << 0, 1 << 5, 1 << 6, 1 << 7, 1 << 8
 ELIDABLE = 0x2
 
-# ttfautohint parameters. Upstream ships stock defaults; these are the two departures that measure
-# better for a coding font, plus the info table. Everything else stays at its default, deliberately.
+# ttfautohint parameters. Upstream ships stock defaults; the one departure is the fallback script,
+# plus the info table. Everything else stays at its default, deliberately.
 #
 #   fallback_script="latn"
-#       THE one that matters. The default, "none", means any glyph outside a recognised script gets
-#       no hinting at all -- and in this font that is 128 box-drawing glyphs, 32 block elements,
-#       21 arrows, 62 math symbols and 43 geometric shapes. Exactly the glyphs a terminal draws
-#       TUI borders, tables, tree views and progress bars with. Hinting them against latin blue
-#       zones snaps their rules onto the pixel grid instead of smearing them across two rows.
+#       The default, "none", means any glyph outside a recognised script gets no hinting at all --
+#       and in this font that is 128 box-drawing glyphs, 32 block elements, 21 arrows, 62 math
+#       symbols and 43 geometric shapes. Exactly the glyphs a terminal draws TUI borders, tables,
+#       tree views and progress bars with. Hinting them against latin blue zones snaps their rules
+#       onto the pixel grid instead of smearing them across two rows. It touches *only* those
+#       glyphs: everything with a real script (letters, digits, punctuation) is hinted identically
+#       to upstream, which `validate.py` asserts glyph by glyph.
 #
-#   *_stem_width_mode=STRONG
-#       Snaps stem widths hard to the grid rather than merely quantizing them. ttfautohint emits a
-#       `prep` that branches on the rendering mode, and each renderer takes a different branch, so
-#       which of these three actually reaches a given user is worth being precise about:
+#   *_stem_width_mode
+#       Left at ttfautohint's defaults: QUANTIZED for grayscale and DirectWrite ClearType, STRONG
+#       for GDI ClearType. The two non-GDI ones were briefly set to STRONG (commit 34aed65) and
+#       reverted: it measured better but rendered too hard-edged in daily use. Kept here because
+#       the trade-off is real and someone will be tempted again --
+#           STRONG     snaps stems hard onto whole pixels. +39.5% fully-saturated ink on letters
+#                      and digits, but the same ink lands so decisively that text reads brittle,
+#                      and it narrows the Bold/Regular contrast to 1.1115.
+#           QUANTIZED  (default, ours) letters render exactly as upstream JetBrains Mono does,
+#                      Bold/Regular contrast 1.1204.
+#           NATURAL    no snapping at all -- softer than upstream, contrast 1.1231.
+#       ttfautohint emits a `prep` that branches on rendering mode, and it is easy to get backwards
+#       which branch reaches whom:
 #           dw_cleartype  -> FreeType's default v40 interpreter, and DirectWrite. v40 emulates
-#                            ClearType, so this is the one nearly every modern reader gets. It is
-#                            what drives the numbers below -- measured by isolating each mode.
+#                            ClearType, so this is the one nearly every modern reader gets.
 #           gray          -> only the legacy v35 interpreter (grayscale, full hinting).
-#           gdi_cleartype -> only Windows GDI ClearType. Already STRONG by default; set anyway so
-#                            the configuration is complete rather than half-explicit.
-#       All three are set so every rendering path gets the same treatment. No size cost.
+#           gdi_cleartype -> only Windows GDI ClearType.
+#       Since all three now sit at their defaults, none is passed: an unset option is the honest
+#       way to say "stock", and the TTFA table records the effective values regardless.
 #
 #   TTFA_info=True
 #       Writes a TTFA table listing every parameter used, so a built font says how it was hinted.
@@ -96,19 +109,11 @@ ELIDABLE = 0x2
 # into half-grays, over 9-18 ppem:
 #                                   symbols   letters+digits   Bold/Regular ink ratio
 #   upstream defaults                0.4385       0.0744               1.1204
-#   fallback_script=latn alone       0.4565       0.0744               1.1204
-#   + dw_cleartype STRONG (ours)     0.5169       0.1038               1.1115
-# i.e. +17.9% on symbols and +39.5% on letters and digits. The letter gain is NOT extra weight:
-# total ink coverage moves -0.13%, so the same ink simply lands decisively instead of blurring.
-# Across the family the letter gain runs +25% (Bold) to +56% (Regular Italic), counters stay fully
-# open, and italic accent separation improves from 0.826 to 0.865.
-#
-# The one real cost, stated plainly: snapping stems to whole pixels narrows the Bold/Regular weight
-# contrast slightly, from a 1.1204 ink ratio to 1.1115 (-0.8%). That matters more here than it
-# usually would, because this family's Bold is only one step up from its Regular (JetBrains Light
-# 300 vs Regular 400). It is a small price for a large legibility gain, but if the family ever reads
-# as too flat between Regular and Bold, `dw_cleartype_stem_width_mode` is the dial: NATURAL restores
-# the contrast (1.1231) and gives up the crispness.
+#   fallback_script=latn (ours)      0.4565       0.0744               1.1204
+#   + dw/gray STRONG (reverted)      0.5169       0.1038               1.1115
+# So this build buys +4.1% on symbols and leaves letters, digits and weight contrast exactly where
+# upstream has them. The STRONG row is what was reverted; the numbers are kept because they are the
+# only measurement of what that costs.
 #
 # Rejected after measuring -- recorded so none of it gets retried on a hunch:
 #   hint_composites          identical metrics even on composite glyphs (accented letters, and the
@@ -123,14 +128,8 @@ ELIDABLE = 0x2
 #   --reference              the faces already agree on x-height, cap-height and baseline at every
 #                            ppem from 9 to 24, so sharing blue zones would change nothing.
 #   fallback_scaling         actively harmful: accent separation collapsed 0.86 -> 0.16.
-#   per-face stem modes      Regular STRONG + Bold QUANTIZED, tried to buy back the contrast above:
-#                            recovers only +0.06% (1.1115 -> 1.1122) while costing Bold a fifth of
-#                            its crispness gain. The contrast cost is inherent to grid-snapping.
 HINT_OPTIONS = dict(
     fallback_script="latn",
-    gray_stem_width_mode=StemWidthMode.STRONG,
-    gdi_cleartype_stem_width_mode=StemWidthMode.STRONG,
-    dw_cleartype_stem_width_mode=StemWidthMode.STRONG,
     TTFA_info=True,
 )
 

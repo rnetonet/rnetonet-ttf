@@ -66,9 +66,9 @@ PRESERVED = ("GDEF", "GPOS", "GSUB", "cmap", "hmtx", "hhea", "post", "cvt ", "ga
 # these is what stops the hinting config from drifting silently.
 EXPECTED_TTFA = {
     "fallback-script": "latn",
-    "gray-stem-width-mode": "strong",
+    "gray-stem-width-mode": "quantized",
     "gdi-cleartype-stem-width-mode": "strong",
-    "dw-cleartype-stem-width-mode": "strong",
+    "dw-cleartype-stem-width-mode": "quantized",
 }
 
 # Vertical metric fields that must match the source and each other -- these set line height, so
