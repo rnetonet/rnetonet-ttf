@@ -1,15 +1,14 @@
-"""Build the `rnetonetcode` and `rnetonetmono` variable families by rebranding Cascadia.
+"""Build the `rnetonet` variable family by rebranding Cascadia Mono.
 
-Two families, four files, from the four upstream Cascadia variable fonts:
+One family, two files, from the two upstream Cascadia Mono variable fonts:
 
-    rnetonet/sources/CascadiaCode.ttf        -> rnetonetcode-Roman.ttf
-    rnetonet/sources/CascadiaCodeItalic.ttf  -> rnetonetcode-Italic.ttf
-    rnetonet/sources/CascadiaMono.ttf        -> rnetonetmono-Roman.ttf
-    rnetonet/sources/CascadiaMonoItalic.ttf  -> rnetonetmono-Italic.ttf
+    rnetonet/sources/CascadiaMono.ttf        -> rnetonet-Roman.ttf
+    rnetonet/sources/CascadiaMonoItalic.ttf  -> rnetonet-Italic.ttf
 
-`rnetonetcode` is Cascadia Code (programming ligatures in `calt`); `rnetonetmono` is Cascadia
-Mono (the same outlines with the ligature lookups removed -- upstream ships them as separate
-files whose `glyf` and `cmap` are byte-identical and whose `calt` holds 116 lookups vs 1).
+Cascadia Mono is Cascadia Code without the programming ligatures -- upstream ships them as
+separate files whose `glyf` and `cmap` are byte-identical, differing only in `calt`, which
+carries 116 lookups in Code and 1 in Mono. Mono is the deliberate choice here: `->`, `!=` and
+`===` stay as the characters they are.
 
 This is a **rebranding and default-settings pipeline**. Nothing is redrawn and nothing is
 re-hinted: the outlines, the TrueType hinting (`fpgm`/`prep`/`cvt `/`cvar` and every glyph's
@@ -17,37 +16,49 @@ instruction stream) and the layout tables come from upstream untouched. Two thin
 
 1. THE WEIGHT AXIS IS CUT DOWN TO TWO WEIGHTS AND RELABELLED.
 
-   Upstream's `wght` runs 200-400-700 with six named instances. This family ships one step
-   lighter, the same premise the JetBrains-based `rnetonet` had: Cascadia's Light is our
-   Regular and Cascadia's SemiLight is our Bold.
+   Upstream's `wght` runs 200-400-700 with six named instances. This family ships lighter than
+   upstream, the same premise the JetBrains-based `rnetonet` had before it. Regular sits exactly
+   halfway between Cascadia's Light and its SemiLight; Bold is SemiLight itself.
 
-       source wght 300 (Light)      -> output wght 400 (Regular)  -- also the new default
-       source wght 350 (SemiLight)  -> output wght 700 (Bold)
+       source wght 325 (Light..SemiLight midpoint) -> output wght 400 (Regular)  -- new default
+       source wght 350 (SemiLight)                 -> output wght 700 (Bold)
 
-   Step one is `instancer.instantiateVariableFont` with a *range* limit, `wght=(300, 300, 350)`.
-   That keeps the font variable, restricts the axis to the 300-350 span, and moves the default
-   onto 300 -- so `glyf` now holds the Light outlines, `cvt ` holds the Light control values
-   rebased through `cvar`, and `gvar`/`HVAR`/`GDEF` carry only the deltas that reach from Light
+   325 is a true midpoint in both senses, which is why it is spellable at all: upstream's `avar`
+   runs straight from normalised -0.5 (Light) to -0.25 (SemiLight), so the user-space midpoint
+   325 lands on design coordinate -0.50000, exactly between Light's -0.66669 and SemiLight's
+   -0.33331. Regular is therefore an interpolation rather than one of upstream's named instances;
+   Bold is SemiLight exactly.
+
+   Step one is `instancer.instantiateVariableFont` with a *range* limit, `wght=(325, 325, 350)`.
+   That keeps the font variable, restricts the axis to the 325-350 span, and moves the default
+   onto 325 -- so `glyf` now holds the midpoint outlines, `cvt ` holds the midpoint control values
+   rebased through `cvar`, and `gvar`/`HVAR`/`GDEF` carry only the deltas that reach from there
    to SemiLight.
 
-   Step two is the relabel: `fvar`'s user-space endpoints are rewritten from 300/300/350 to
+   Step two is the relabel: `fvar`'s user-space endpoints are rewritten from 325/325/350 to
    400/400/700. This is pure relabelling and cannot move an outline. Variation deltas live in
    *normalised* space (-1..1) and `avar` maps normalised to normalised; the only thing an
    `fvar` min/default/max triple decides is how a user-space number is projected onto that
-   normalised range. Both triples project 300->0.0 and 350->1.0, so every rendered instance is
-   identical -- `wght=400` renders exactly what `wght=300` did, `wght=700` exactly what 350 did,
+   normalised range. Both triples project 325->0.0 and 350->1.0, so every rendered instance is
+   identical -- `wght=400` renders exactly what `wght=325` did, `wght=700` exactly what 350 did,
    and `wght=550` the midpoint either way. `validate.py` proves this by instancing both fonts at
    matched positions and comparing every coordinate.
+
+   The relabel stays affine because the whole cut, normalised -0.375 to -0.25, sits inside that
+   one straight `avar` segment. `validate.py` re-derives the span from the source and checks the
+   middle of the axis as well as the ends, so a source whose `avar` grew a knee in here would
+   fail rather than quietly bend.
 
    Why relabel at all: the family has to *say* Regular and Bold. Left at 300-350 the OS reads a
    Light family -- `usWeightClass` 300, `font-weight: 400` resolving to the lighter end -- and
    every RIBBI convention in the OpenType stack argues with the file. Relabelled, `font-weight:
    400` is the Regular, `700` is the Bold, and the span between them stays continuously variable.
 
-   The Regular/Bold contrast this buys is small on purpose: 1.2535x the ink (outline area over
-   the 62 ASCII alphanumerics, source instanced at 350 vs 300). That is *more* contrast than the
-   JetBrains-based family this replaces had at 1.1203, so the light-bold preference that family
-   was tuned around survives the move.
+   The Regular/Bold contrast this buys is small on purpose: 1.1116x the ink (outline area over
+   the 62 ASCII alphanumerics, source instanced at 350 vs 325). That is deliberately close to the
+   1.1203x the JetBrains-based family this replaces shipped -- the light-bold preference that
+   family was tuned around is the point, and anchoring Regular at the midpoint rather than at
+   Light is what buys it while keeping Bold on a real upstream master.
 
 2. THE METADATA IS REBRANDED. Family, subfamily, unique ID, full name, PostScript name and the
    variations PostScript prefix (nameID 25) are rewritten; `fvar` gets two named instances;
@@ -57,7 +68,7 @@ instruction stream) and the layout tables come from upstream untouched. Two thin
 What is NOT touched, and is checked table by table in `validate.py`: `glyf` outlines and
 instruction streams (as the same slice of design space), `fpgm`, `prep`, `gasp`, `cmap`, `post`,
 `GSUB` lookups, `GPOS`, vertical metrics (typo 1900/-480/0, win 2226/480, upem 2048 -- identical
-across all four files, so line height is stable across both families), the monospace advance
+across both files, so line height is stable across the family), the monospace advance
 (1200), and PANOSE. PANOSE weight stays at 6 (Medium) deliberately: it describes the weight the
 font *declares*, which after the relabel is 400, not the master it was cut from.
 
@@ -71,7 +82,7 @@ Three things do change as a consequence of restricting the axis, each of them co
                 `hhea`'s derived min/max fields follow the bearings.
     GSUB rvrn   dropped, with its 2 lookups. `rvrn` is upstream's required-variation feature and
                 its condition sets cover normalised design 0.0-1.0, i.e. `wght` 400-700 in source
-                terms. Our whole range sits at design -0.667..-0.333, below every condition, so
+                terms. Our whole range sits at design -0.500..-0.333, below every condition, so
                 the feature could never fire here. `calt`, `rclt`, `rlig`, the `ssXX` sets and
                 every other feature come through with their lookups intact.
 
@@ -85,12 +96,12 @@ text is altered (clause 5).
 
 Filenames avoid the `Family[wght].ttf` convention on purpose: a literal `[wght]` in a filename
 is a glob bracket expression and quietly breaks shell and Python globbing. `-Roman`/`-Italic`
-mirrors upstream's own `CascadiaCodeRoman` variations prefix and globs cleanly.
+mirrors upstream's own `CascadiaMonoRoman` variations prefix and globs cleanly.
 
 Usage:
     python pipeline/build.py
 
-Run `python pipeline/validate.py` afterwards to check the four outputs.
+Run `python pipeline/validate.py` afterwards to check the two outputs.
 """
 
 import os
@@ -102,9 +113,9 @@ from fontTools.varLib import instancer
 
 # Repo root, resolved from this file so the pipeline runs from any working directory.
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BRAND = "rnetonet"
-SRC_DIR = os.path.join(REPO, BRAND, "sources")
-OUT_DIR = os.path.join(REPO, BRAND)
+FAMILY = "rnetonet"
+SRC_DIR = os.path.join(REPO, FAMILY, "sources")
+OUT_DIR = os.path.join(REPO, FAMILY)
 WINDOWS = (3, 1, 0x409)
 
 ITALIC, BOLD, REGULAR, USE_TYPO, WWS = 1 << 0, 1 << 5, 1 << 6, 1 << 7, 1 << 8
@@ -113,7 +124,7 @@ ELIDABLE = 0x2
 # The cut. Source coordinates are Cascadia's named instances; output coordinates are the RIBBI
 # weight classes they get relabelled to. Nothing between these two numbers is interpolated by us
 # -- the span is upstream's own design space, just addressed under different user-space labels.
-SRC_REGULAR, SRC_BOLD = 300, 350   # Cascadia Light, Cascadia SemiLight
+SRC_REGULAR, SRC_BOLD = 325, 350   # Light..SemiLight midpoint, Cascadia SemiLight
 OUT_REGULAR, OUT_BOLD = 400, 700   # our Regular, our Bold
 
 # Names that describe Cascadia and must not survive the rename. 1-6 are rewritten; 7 is the
@@ -143,18 +154,12 @@ ITALIC_ITAL = dict(value=1, name="Italic")
 # the first is the default instance and reuses nameIDs 2 and 6 rather than minting new records,
 # which is what the OpenType spec asks for and what readers expect to find there.
 CUTS = [
-    dict(suffix="Roman", subfamily="Regular", ps_suffix="Regular", italic=False,
-         prefix="Roman", stat_ital=ROMAN_ITAL,
+    dict(source="CascadiaMono.ttf", suffix="Roman", subfamily="Regular", ps_suffix="Regular",
+         italic=False, prefix="Roman", stat_ital=ROMAN_ITAL,
          instances=[("Regular", "Regular", OUT_REGULAR), ("Bold", "Bold", OUT_BOLD)]),
-    dict(suffix="Italic", subfamily="Italic", ps_suffix="Italic", italic=True,
-         prefix="Italic", stat_ital=ITALIC_ITAL,
+    dict(source="CascadiaMonoItalic.ttf", suffix="Italic", subfamily="Italic", ps_suffix="Italic",
+         italic=True, prefix="Italic", stat_ital=ITALIC_ITAL,
          instances=[("Italic", "Italic", OUT_REGULAR), ("Bold Italic", "BoldItalic", OUT_BOLD)]),
-]
-
-# family -> (roman source, italic source)
-FAMILIES = [
-    ("rnetonetcode", "CascadiaCode.ttf", "CascadiaCodeItalic.ttf"),
-    ("rnetonetmono", "CascadiaMono.ttf", "CascadiaMonoItalic.ttf"),
 ]
 
 
@@ -196,7 +201,8 @@ def label(name, string):
     return name.addName(string, platforms=(WINDOWS,))
 
 
-def build(family, source, cut):
+def build(cut):
+    source = cut["source"]
     src_path = os.path.join(SRC_DIR, source)
     # recalcTimestamp=False makes the build byte-reproducible. fontTools stamps `head.modified`
     # with the wall clock on save, which is the only thing that differed between two runs of this
@@ -234,21 +240,21 @@ def build(family, source, cut):
     id3 = name.getDebugName(3) or ""
     ver_num = (id3.split(";")[0] if id3.split(";")[0]
                else version.replace("Version ", "").split(";")[0].strip())
-    ps_name = f"{family}-{cut['ps_suffix']}"
+    ps_name = f"{FAMILY}-{cut['ps_suffix']}"
     vend = vendor_id(os2)
 
     drop = DROP_IDS | {i for i in range(256, 32768) if i not in keep}
     name.names = [r for r in name.names if r.nameID not in drop]
     for name_id, value in (
-        (1, family),
+        (1, FAMILY),
         (2, cut["subfamily"]),
         (3, f"{ver_num};{vend};{ps_name}"),
-        (4, f"{family} {cut['subfamily']}"),
+        (4, f"{FAMILY} {cut['subfamily']}"),
         (5, version),
         (6, ps_name),
         # nameID 25 prefixes the PostScript name of any instance that has none of its own, so it
         # must be alphanumeric and must not collide with nameID 6 for a different style.
-        (25, f"{family}{cut['prefix']}"),
+        (25, f"{FAMILY}{cut['prefix']}"),
     ):
         name.setName(value, name_id, *WINDOWS)
 
@@ -268,7 +274,7 @@ def build(family, source, cut):
             instance.postscriptNameID = 6
         else:
             instance.subfamilyNameID = label(name, style)
-            instance.postscriptNameID = label(name, f"{family}-{ps_suffix}")
+            instance.postscriptNameID = label(name, f"{FAMILY}-{ps_suffix}")
         fvar.instances.append(instance)
 
     # 3. Style bits. The default instance is the Regular (or the Regular Italic), so no file is
@@ -301,7 +307,7 @@ def build(family, source, cut):
     if "DSIG" in font:                       # invalidated by any edit; instancer drops it already
         del font["DSIG"]
 
-    out = f"{family}-{cut['suffix']}.ttf"
+    out = f"{FAMILY}-{cut['suffix']}.ttf"
     font.save(os.path.join(OUT_DIR, out))
     print(
         f"{source:<26} -> {out:<26} "
@@ -316,9 +322,8 @@ def build(family, source, cut):
 
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
-    for family, roman_src, italic_src in FAMILIES:
-        for source, cut in zip((roman_src, italic_src), CUTS):
-            build(family, source, cut)
+    for cut in CUTS:
+        build(cut)
 
 
 if __name__ == "__main__":

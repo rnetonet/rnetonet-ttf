@@ -1,24 +1,25 @@
-"""Validate the built `rnetonetcode` and `rnetonetmono` families. Acceptance gate for `build.py`.
+"""Validate the built `rnetonet` family. Acceptance gate for `build.py`.
 
 Five stages, each of which can fail the run (non-zero exit) so this doubles as a CI gate:
 
 1. OTS (OpenType Sanitizer) must accept every output -- the hard "will browsers and rasterizers
    actually load this" bar.
 
-2. Build scope. `build.py` cuts the weight axis down to Cascadia's Light..SemiLight span,
-   relabels that span as 400..700, and rebrands the metadata. Nothing else. Byte-identity is the
+2. Build scope. `build.py` cuts the weight axis down to the span between the Light/SemiLight
+   midpoint and SemiLight, relabels that span as 400..700, and rebrands the metadata. Nothing else. Byte-identity is the
    wrong test for most tables here -- restricting a variable axis legitimately rewrites `glyf`,
    `gvar`, `cvt `, `cvar`, `hmtx`, `hhea` and the variation stores in `GDEF`/`GPOS` -- so the
    scope is proved three other ways:
 
      * **Outline equivalence across the whole axis.** Both the source and the output are
-       instanced at matching positions (source 300/325/350 against output 400/550/700, the same
+       instanced at matching positions (source 325/337.5/350 against output 400/550/700, the same
        three points of the same design-space span) and every glyph's every coordinate is
        compared. At the default the two must be *identical*; elsewhere they may differ by at
-       most one font unit, 1/2048 em. That one unit is a floor, not a slack budget: upstream did
-       not draw Light on integer coordinates -- it is an interpolation of Cascadia's masters --
-       so rebasing the default onto it must round, and the Bold deltas then round against that
-       rounded default. `build.py` passes `optimize=False` to keep the whole axis at that floor.
+       most one font unit, 1/2048 em. That one unit is a floor, not a slack budget: the Regular
+       is the midpoint between Cascadia's Light and SemiLight, so it is an interpolation and not
+       on integer coordinates -- rebasing the default onto it must round, and the Bold deltas
+       then round against that rounded default. `build.py` passes `optimize=False` to keep the
+       whole axis at that floor.
      * **Hinting identity.** `fpgm`, `prep` and every glyph's instruction bytecode must be
        byte-identical to the source. `cvt `/`cvar` are exempt and must not be: those are control
        *values*, and rebasing them onto the new default through `cvar` is what a variable font's
@@ -31,29 +32,29 @@ Five stages, each of which can fail the run (non-zero exit) so this doubles as a
        from it. If a source update ever moves those conditions into range, this fails loudly.
 
 3. Shaping equivalence, via HarfBuzz -- the check that actually matters for a coding font.
-   A corpus of operators, prose, accented and combining-mark text, RTL and box drawing is shaped
-   through the source and through the output at both ends of the axis; the glyph *names* must
-   match exactly and the positions to within the same one-unit floor. Then the family split is
-   asserted behaviourally: `rnetonetcode` must ligate `-> => != === <=>` and friends, and
-   `rnetonetmono` must leave every one of them as plain characters.
+   A corpus of operators, prose, accented and combining-mark text, RTL and box drawing, plus a
+   generated `base + mark` probe for every combining mark the font maps, is shaped through the
+   source and through the output at both ends of the axis; the glyph *names* must match exactly
+   and the positions to within the same one-unit floor. The generated probes are there because
+   the prose alone left most of Cascadia's 319 GPOS mark records unexercised. Then the ligature policy is
+   asserted behaviourally: this family is cut from Cascadia *Mono*, so `-> => != === <=>` and
+   friends must come out as plain characters at both weights.
 
 4. Structural / variable-font checks: `fvar` axis 400-400-700 with exactly two named instances,
    the default one reusing nameIDs 2 and 6; `STAT` with a `wght` axis (Regular linked to Bold,
    Regular elided) and an `ital` axis; RIBBI-correct names, weight class and style bits; no
    Cascadia or Microsoft branding left in the identity strings; no NUL bytes; Windows-only name
    records; no DSIG; integer-PPEM `head.flags` bit; uniform advance widths at both weights;
-   vertical metrics untouched and identical across all four files; and the two families sharing
-   nothing but their metrics.
+   vertical metrics untouched and identical across both files.
 
-5. fontbakery `check-universal`, run **once per family** -- the two families are separate
-   families and running them together only produces "inconsistent family name" noise. No FAIL is
-   tolerated beyond the known inherited set (EXPECTED_FAILS).
+5. fontbakery `check-universal` over the family. No FAIL is tolerated beyond the known inherited
+   set (EXPECTED_FAILS).
 
-The EXPECTED_FAILS all come from upstream Cascadia, not from the rebrand. That is verified, not
-assumed: the same profile over the untouched sources produces the same five, and the two stages
-of the build were measured separately -- restricting the axis adds `fvar/regular_coords_correct`
-and `varfont/valid_default_instance_nameids` (the axis says 300 while the names still say
-Regular), and rebranding then fixes both, plus `no_mac_entries`, introducing nothing.
+The EXPECTED_FAILS all come from upstream Cascadia Mono, not from the rebrand. That is verified,
+not assumed: the same profile over the untouched sources produces the same five, and the two
+stages of the build were measured separately -- restricting the axis adds one FAIL,
+`fvar/regular_coords_correct` (the axis says 325 while the names still say Regular), and the
+rebrand then fixes that one plus `no_mac_entries`, introducing nothing of its own.
 
     arabic_high_hamza              upstream: U+0674 is classed as a mark in GDEF
     case_mapping                   upstream: some cased glyphs lack round-trip case pairs
@@ -62,11 +63,12 @@ Regular), and rebranding then fixes both, plus `no_mac_entries`, introducing not
     smart_dropout                  upstream: Cascadia is VTT-hinted, and its `prep` does not carry
                                    the ttfautohint smart-dropout instruction sequence
 
-One WARN is also expected and is *not* inherited: `points_out_of_bounds` fires on one Arabic
-contextual form, `uni0777.fina`, whose composite bounding box rounds one unit short of a
-component point once the default sits on Light. The source instanced at Light has it too. It is
-a WARN, on one glyph, from the rounding floor above; fontbakery's own advice on this check is
-that fixing it usually does more harm than good.
+One WARN is also expected and is *not* inherited: `points_out_of_bounds` fires on a single glyph,
+`ninepersiansuperior`, whose composite bounding box rounds a unit short of a component point once
+the default sits on the midpoint. It comes from the rounding floor above, not from the rebrand --
+the axis cut alone produces it, before any metadata is touched. Which glyph trips it depends on
+where the default lands, so expect the name to move if the cut ever does. fontbakery's own advice
+on this check is that fixing it usually does more harm than good.
 
 Usage:
     python pipeline/validate.py
@@ -87,14 +89,14 @@ from fontTools.varLib import instancer
 from fontTools.varLib.models import normalizeValue, piecewiseLinearMap
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BRAND = "rnetonet"
-OUT_DIR = os.path.join(REPO, BRAND)
-SRC_DIR = os.path.join(REPO, BRAND, "sources")
+FAMILY = "rnetonet"
+OUT_DIR = os.path.join(REPO, FAMILY)
+SRC_DIR = os.path.join(REPO, FAMILY, "sources")
 
 ITALIC, BOLD, REGULAR, USE_TYPO, WWS = 1 << 0, 1 << 5, 1 << 6, 1 << 7, 1 << 8
 ELIDABLE = 0x2
 
-SRC_REGULAR, SRC_BOLD = 300, 350
+SRC_REGULAR, SRC_BOLD = 325, 350
 OUT_REGULAR, OUT_BOLD = 400, 700
 
 # Fractions of the cut span to compare source against output at: both ends and the middle. The
@@ -102,7 +104,7 @@ OUT_REGULAR, OUT_BOLD = 400, 700
 # interior rather than merely correct at the two points anyone looks at.
 PROBES = (0.0, 0.5, 1.0)
 
-# The rounding floor from rebasing the default onto Light, in font units at 2048 upem. Exact
+# The rounding floor from rebasing the default onto the midpoint, in font units at 2048 upem. Exact
 # equality is required at the default itself, where no interpolation happens.
 UNIT_TOLERANCE = 1
 
@@ -143,25 +145,21 @@ SHAPING_CORPUS = [
     "←↑→↓ ⇒ ∀ ∈ ℝ ≠ ≤ ≥",
 ]
 
-# Sequences `rnetonetcode` must ligate and `rnetonetmono` must not. Cascadia's ligatures are
-# monospace-preserving -- `->` stays two glyph slots, it just uses `hyphen_start.seq` and
-# `greater_hyphen_end.seq` instead of `hyphen` and `greater` -- so counting glyphs proves
-# nothing. The test is whether the shaped glyphs are still the plain per-character ones.
+# Sequences this family must NOT ligate: it is cut from Cascadia Mono, the ligature-free half of
+# upstream. Cascadia's ligatures are monospace-preserving -- in Cascadia Code `->` stays two glyph
+# slots, it just uses `hyphen_start.seq` and `greater_hyphen_end.seq` instead of `hyphen` and
+# `greater` -- so counting glyphs would prove nothing. The test is whether the shaped glyphs are
+# still the plain per-character ones straight out of cmap.
 LIGATURE_TESTS = ("->", "=>", "!=", "===", "<=>", "|>", "::", "?.", ">=", "<-")
 
-SPECS = {}
-for _family, _roman_src, _italic_src, _ligatures in (
-    ("rnetonetcode", "CascadiaCode.ttf", "CascadiaCodeItalic.ttf", True),
-    ("rnetonetmono", "CascadiaMono.ttf", "CascadiaMonoItalic.ttf", False),
-):
-    SPECS[f"{_family}-Roman.ttf"] = dict(
-        family=_family, source=_roman_src, subfamily="Regular", italic=False, prefix="Roman",
-        ligatures=_ligatures, instances=[("Regular", "Regular", OUT_REGULAR),
-                                         ("Bold", "Bold", OUT_BOLD)])
-    SPECS[f"{_family}-Italic.ttf"] = dict(
-        family=_family, source=_italic_src, subfamily="Italic", italic=True, prefix="Italic",
-        ligatures=_ligatures, instances=[("Italic", "Italic", OUT_REGULAR),
-                                         ("Bold Italic", "BoldItalic", OUT_BOLD)])
+SPECS = {
+    f"{FAMILY}-Roman.ttf": dict(
+        source="CascadiaMono.ttf", subfamily="Regular", italic=False, prefix="Roman",
+        instances=[("Regular", "Regular", OUT_REGULAR), ("Bold", "Bold", OUT_BOLD)]),
+    f"{FAMILY}-Italic.ttf": dict(
+        source="CascadiaMonoItalic.ttf", subfamily="Italic", italic=True, prefix="Italic",
+        instances=[("Italic", "Italic", OUT_REGULAR), ("Bold Italic", "BoldItalic", OUT_BOLD)]),
+}
 
 
 class Report:
@@ -236,6 +234,40 @@ def coordinate_drift(source, output):
             else:
                 worst = max(worst, abs(a[0] - b[0]), abs(a[1] - b[1]))
     return worst, points, None
+
+
+NUMERIC_VALUE = re.compile(r'value="(-?\d+)"')
+
+
+def gpos_dump(font):
+    """GPOS as XML. Only meaningful on a *fully instanced* font, where every Device/VariationIndex
+    table has been resolved away -- on the variable originals the two sides carry different
+    variation data and would never compare."""
+    if "GPOS" not in font:
+        return ""
+    buffer = io.StringIO()
+    font.saveXML(buffer, tables=["GPOS"])
+    return buffer.getvalue()
+
+
+def positioning_drift(source, output):
+    """(worst absolute deviation, values differing, structural mismatch) between two GPOS dumps.
+
+    Lines may differ only in a single numeric `value="N"`. Anything else -- a different tag, a
+    different attribute, a different line count -- is a structural change and fails outright."""
+    left, right = source.splitlines(), output.splitlines()
+    if len(left) != len(right):
+        return None, 0, f"{len(left)} lines vs {len(right)}"
+    worst = differing = 0
+    for a, b in zip(left, right):
+        if a == b:
+            continue
+        got, want = NUMERIC_VALUE.search(a), NUMERIC_VALUE.search(b)
+        if not (got and want) or NUMERIC_VALUE.sub("", a) != NUMERIC_VALUE.sub("", b):
+            return None, differing, f"non-numeric difference: {a.strip()!r} vs {b.strip()!r}"
+        worst = max(worst, abs(int(got.group(1)) - int(want.group(1))))
+        differing += 1
+    return worst, differing, None
 
 
 def instruction_streams(font):
@@ -332,6 +364,23 @@ def shape(path, text, wght):
             for info, pos in zip(buffer.glyph_infos, buffer.glyph_positions)]
 
 
+def mark_probes(font):
+    """`base + combining mark` for every mark the font maps, so the shaping stage exercises GPOS
+    anchors broadly instead of relying on whichever ones the prose corpus happens to touch.
+
+    This exists because it was measured: the prose corpus alone reaches only a couple of mark
+    anchors, and moving one of Cascadia's 319 mark records by 40 units went undetected. 53 marks
+    are reachable through cmap; pairing each with two different bases covers them."""
+    cmap = font.getBestCmap()
+    gdef = font["GDEF"].table if "GDEF" in font else None
+    classes = gdef.GlyphClassDef.classDefs if gdef and gdef.GlyphClassDef else {}
+    codepoint = {}
+    for cp, glyph in cmap.items():
+        codepoint.setdefault(glyph, cp)
+    marks = sorted(codepoint[g] for g, c in classes.items() if c == 3 and g in codepoint)
+    return [base + chr(cp) for cp in marks for base in ("a", "O")]
+
+
 def plain_glyph_names(font, text):
     """What `text` shapes to with no substitutions at all: one glyph per character, straight out
     of cmap. This is what an unligated font must produce."""
@@ -384,23 +433,38 @@ def stage_scope(report):
         report.check(len(font.getTableData("cvt ")) > 0 and "cvar" in font,
                      f"{filename}: cvt/cvar present (hinting still varies with weight)")
 
-        # Outlines: the same slice of the same design space, addressed under new labels.
+        # Outlines and positioning: the same slice of the same design space, under new labels.
         for fraction in PROBES:
             source_at = SRC_REGULAR + fraction * (SRC_BOLD - SRC_REGULAR)
             output_at = OUT_REGULAR + fraction * (OUT_BOLD - OUT_REGULAR)
-            drift, points, broken = coordinate_drift(
-                glyph_coordinates(pinned(src_path(spec), source_at)),
-                glyph_coordinates(pinned(out_path(filename), output_at)),
-            )
+            limit = 0 if fraction == 0.0 else UNIT_TOLERANCE
+            source_pin = pinned(src_path(spec), source_at)
+            output_pin = pinned(out_path(filename), output_at)
+
+            drift, points, broken = coordinate_drift(glyph_coordinates(source_pin),
+                                                     glyph_coordinates(output_pin))
             if broken:
                 report.check(False, f"{filename}: outlines at src {source_at:g} / out {output_at:g}",
                              broken)
-                continue
-            limit = 0 if fraction == 0.0 else UNIT_TOLERANCE
-            report.check(drift <= limit,
-                         f"{filename}: {points} coordinates at out {output_at:g} match src "
-                         f"{source_at:g} within {limit} unit(s) (worst {drift})",
-                         f"worst deviation {drift}")
+            else:
+                report.check(drift <= limit,
+                             f"{filename}: {points} coordinates at out {output_at:g} match src "
+                             f"{source_at:g} within {limit} unit(s) (worst {drift})",
+                             f"worst deviation {drift}")
+
+            # Every GPOS value, compared on the fully instanced tables where no variation data is
+            # left to explain a difference away. This covers all 319 mark records, including the
+            # ~half that no shaping probe can reach -- `uniFBBC.comb` and the other Arabic
+            # contextual marks have no cmap entry, so only a direct table comparison sees them.
+            drift, values, broken = positioning_drift(gpos_dump(source_pin), gpos_dump(output_pin))
+            if broken:
+                report.check(False, f"{filename}: GPOS at src {source_at:g} / out {output_at:g}",
+                             broken)
+            else:
+                report.check(drift <= limit,
+                             f"{filename}: GPOS at out {output_at:g} matches src {source_at:g} "
+                             f"within {limit} unit(s) ({values} values differ, worst {drift})",
+                             f"worst deviation {drift}")
 
         # Layout: every feature keeps its lookups, and the only tag allowed to vanish is one that
         # was unreachable in this span to begin with.
@@ -433,11 +497,12 @@ def stage_shaping(report):
     print("\n== Shaping (HarfBuzz: same glyphs, same positions, and the right ligature policy) ==")
     for filename, spec in SPECS.items():
         output, source = out_path(filename), src_path(spec)
+        corpus = SHAPING_CORPUS + mark_probes(TTFont(output, lazy=True))
         for fraction in (0.0, 1.0):
             source_at = SRC_REGULAR + fraction * (SRC_BOLD - SRC_REGULAR)
             output_at = OUT_REGULAR + fraction * (OUT_BOLD - OUT_REGULAR)
             names_ok, worst, count = True, 0, 0
-            for text in SHAPING_CORPUS:
+            for text in corpus:
                 want = shape(source, text, source_at)
                 got = shape(output, text, output_at)
                 if [g[0] for g in want] != [g[0] for g in got]:
@@ -455,48 +520,41 @@ def stage_shaping(report):
                          f"unit(s) of src {source_at:g} (worst {worst})")
 
         font = TTFont(output, lazy=True)
-        ligated, plain = [], []
+        ligated = []
         for text in LIGATURE_TESTS:
             expected = plain_glyph_names(font, text)
             for wght in (OUT_REGULAR, OUT_BOLD):
-                got = [g[0] for g in shape(output, text, wght)]
-                (ligated if got != expected else plain).append((text, wght))
-        if spec["ligatures"]:
-            report.check(not plain,
-                         f"{filename}: ligates all {len(LIGATURE_TESTS)} sequences at both weights",
-                         f"left plain: {plain}")
-        else:
-            report.check(not ligated,
-                         f"{filename}: leaves all {len(LIGATURE_TESTS)} sequences unligated",
-                         f"ligated: {ligated}")
+                if [g[0] for g in shape(output, text, wght)] != expected:
+                    ligated.append((text, wght))
+        report.check(not ligated,
+                     f"{filename}: leaves all {len(LIGATURE_TESTS)} sequences unligated "
+                     f"at both weights",
+                     f"ligated: {ligated}")
 
 
 def stage_structure(report):
     print("\n== Structural / variable-font ==")
     metrics_seen = {}
-    families = {}
     for filename, spec in SPECS.items():
         font = TTFont(out_path(filename), lazy=True)
         source = TTFont(src_path(spec), lazy=True)
         name, os2, head = font["name"], font["OS/2"], font["head"]
-        family = spec["family"]
 
-        report.check(name.getDebugName(1) == family, f"{filename}: nameID1 == '{family}'",
+        report.check(name.getDebugName(1) == FAMILY, f"{filename}: nameID1 == '{FAMILY}'",
                      f"got {name.getDebugName(1)!r}")
         report.check(name.getDebugName(2) == spec["subfamily"],
                      f"{filename}: nameID2 == '{spec['subfamily']}'",
                      f"got {name.getDebugName(2)!r}")
-        report.check(name.getDebugName(4) == f"{family} {spec['subfamily']}",
-                     f"{filename}: nameID4 == '{family} {spec['subfamily']}'",
+        report.check(name.getDebugName(4) == f"{FAMILY} {spec['subfamily']}",
+                     f"{filename}: nameID4 == '{FAMILY} {spec['subfamily']}'",
                      f"got {name.getDebugName(4)!r}")
         ps = name.getDebugName(6) or ""
-        report.check(ps == f"{family}-{spec['subfamily'].replace(' ', '')}" and " " not in ps,
+        report.check(ps == f"{FAMILY}-{spec['subfamily'].replace(' ', '')}" and " " not in ps,
                      f"{filename}: PostScript name well-formed", f"got {ps!r}")
         prefix = name.getDebugName(25) or ""
-        report.check(prefix == f"{family}{spec['prefix']}" and prefix.isalnum(),
+        report.check(prefix == f"{FAMILY}{spec['prefix']}" and prefix.isalnum(),
                      f"{filename}: variations PostScript prefix (nameID 25) well-formed",
                      f"got {prefix!r}")
-        families.setdefault(family, set()).add(filename)
 
         # The identity strings must not still say Cascadia or Microsoft. The attribution strings
         # (0, 8, 9, 11-14) legitimately do and are left alone; 7 is the trademark and must go.
@@ -538,9 +596,9 @@ def stage_structure(report):
         for instance, (style, ps_suffix, wght) in zip(fvar.instances, spec["instances"]):
             report.check(instance.coordinates == {"wght": wght}
                          and name.getDebugName(instance.subfamilyNameID) == style
-                         and name.getDebugName(instance.postscriptNameID) == f"{family}-{ps_suffix}",
+                         and name.getDebugName(instance.postscriptNameID) == f"{FAMILY}-{ps_suffix}",
                          f"{filename}: instance '{style}' at wght {wght} "
-                         f"-> {family}-{ps_suffix}",
+                         f"-> {FAMILY}-{ps_suffix}",
                          f"got {name.getDebugName(instance.subfamilyNameID)!r} "
                          f"{instance.coordinates} "
                          f"ps={name.getDebugName(instance.postscriptNameID)!r}")
@@ -616,12 +674,10 @@ def stage_structure(report):
                          f"{filename}: monospace at wght {wght} (uniform advance)",
                          f"widths={sorted(widths)}")
 
-    for family, filenames in sorted(families.items()):
-        report.check(len(filenames) == 2, f"{family}: roman + italic present",
-                     f"got {sorted(filenames)}")
-    report.check(len(families) == 2, "two distinct families built", f"got {sorted(families)}")
+    report.check(len(metrics_seen) == 2, f"{FAMILY}: roman + italic both present",
+                 f"got {sorted(metrics_seen)}")
     report.check(len(set(metrics_seen.values())) == 1,
-                 "vertical metrics identical across both families (stable line height)",
+                 "vertical metrics identical across the family (stable line height)",
                  f"got {metrics_seen}")
 
 
@@ -631,41 +687,36 @@ def _check_id(check):
 
 
 def stage_fontbakery(report):
-    print("\n== fontbakery check-universal (FAIL level, one run per family) ==")
-    by_family = {}
-    for filename, spec in SPECS.items():
-        by_family.setdefault(spec["family"], []).append(out_path(filename))
+    print("\n== fontbakery check-universal (FAIL level) ==")
+    fonts = [out_path(filename) for filename in SPECS]
+    with tempfile.TemporaryDirectory() as tmp:
+        json_path = os.path.join(tmp, "fb.json")
+        subprocess.run(
+            [sys.executable, "-m", "fontbakery", "check-universal",
+             "--loglevel", "FAIL", "--no-progress", "-C", "--json", json_path, *fonts],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        with open(json_path, encoding="utf-8") as handle:
+            data = json.load(handle)
 
-    for family, fonts in sorted(by_family.items()):
-        with tempfile.TemporaryDirectory() as tmp:
-            json_path = os.path.join(tmp, "fb.json")
-            subprocess.run(
-                [sys.executable, "-m", "fontbakery", "check-universal",
-                 "--loglevel", "FAIL", "--no-progress", "-C", "--json", json_path, *fonts],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )
-            with open(json_path, encoding="utf-8") as handle:
-                data = json.load(handle)
+    unexpected, expected_seen = {}, {}
+    for section in data["sections"]:
+        for check in section["checks"]:
+            if check["result"] != "FAIL":
+                continue
+            cid = _check_id(check)
+            filename = os.path.basename(check.get("filename") or "<family>")
+            bucket = expected_seen if cid in EXPECTED_FAILS else unexpected
+            bucket.setdefault(cid, []).append(filename)
 
-        unexpected, expected_seen = {}, {}
-        for section in data["sections"]:
-            for check in section["checks"]:
-                if check["result"] != "FAIL":
-                    continue
-                cid = _check_id(check)
-                filename = os.path.basename(check.get("filename") or "<family>")
-                bucket = expected_seen if cid in EXPECTED_FAILS else unexpected
-                bucket.setdefault(cid, []).append(filename)
-
-        counts = data["result"]
-        print(f"  {family}: PASS={counts.get('PASS')} FAIL={counts.get('FAIL')} "
-              f"WARN={counts.get('WARN')} SKIP={counts.get('SKIP')} INFO={counts.get('INFO')}")
-        for cid in sorted(expected_seen):
-            print(f"    [expected FAIL] {cid} ({len(expected_seen[cid])} files)")
-        for cid in sorted(unexpected):
-            print(f"    [UNEXPECTED FAIL] {cid}: {', '.join(unexpected[cid])}")
-        report.check(not unexpected,
-                     f"{family}: no fontbakery FAIL beyond the expected/inherited set")
+    counts = data["result"]
+    print(f"  totals: PASS={counts.get('PASS')} FAIL={counts.get('FAIL')} "
+          f"WARN={counts.get('WARN')} SKIP={counts.get('SKIP')} INFO={counts.get('INFO')}")
+    for cid in sorted(expected_seen):
+        print(f"    [expected FAIL] {cid} ({len(expected_seen[cid])} files)")
+    for cid in sorted(unexpected):
+        print(f"    [UNEXPECTED FAIL] {cid}: {', '.join(unexpected[cid])}")
+    report.check(not unexpected, "no fontbakery FAIL beyond the expected/inherited set")
 
 
 def main():
